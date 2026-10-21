@@ -21,12 +21,20 @@ def answer(choice, ids, confidence=0.8):
 
 
 class Response:
-    def __init__(self, status, body=None):
+    def __init__(self, status, body=None, chunks=None):
         self.status_code = status
         self._body = body
+        self.chunks = chunks
+        self.closed = False
 
     def json(self):
         return self._body
+
+    def iter_content(self, size):
+        yield from self.chunks if self.chunks is not None else [json.dumps(self._body).encode()]
+
+    def close(self):
+        self.closed = True
 
 
 def test_api_key_prefers_the_jev_key(monkeypatch):
@@ -48,7 +56,7 @@ def test_post_json_retries_rate_limits_then_returns(monkeypatch, key):
     replies = iter([Response(429), Response(200, {"ok": 1})])
     sent = []
 
-    def post(url, json, headers, timeout):
+    def post(url, json, headers, timeout, **options):
         sent.append(headers["Authorization"])
         return next(replies)
 
@@ -66,12 +74,24 @@ def test_post_json_gives_up_after_three_rate_limits(monkeypatch, key):
 
 
 def test_post_json_maps_a_non_json_reply(monkeypatch, key):
-    class Bad(Response):
-        def json(self):
-            raise ValueError("Expecting value")
-
-    monkeypatch.setattr(jev._HTTP, "post", lambda *a, **k: Bad(200))
+    monkeypatch.setattr(jev._HTTP, "post", lambda *a, **k: Response(200, chunks=[b"not json"]))
     with pytest.raises(jev.ModelError, match="non-JSON"):
+        jev.post_json("https://x.test", {})
+
+
+def test_a_reply_kept_alive_without_an_answer_is_bounded(monkeypatch, key):
+    # A provider can keep an unfinished reply alive with whitespace; a per-read
+    # timeout never fires, so the whole reply has a wall-clock deadline.
+    clock = iter(range(0, 100_000, 5))
+    monkeypatch.setattr(jev.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(jev.time, "sleep", lambda s: None)
+    stalled = [Response(200, chunks=(b" " for _ in range(10_000))) for _ in range(3)]
+    replies = iter([stalled[0], Response(200, {"ok": 1})])
+    monkeypatch.setattr(jev._HTTP, "post", lambda *a, **k: next(replies))
+    assert jev.post_json("https://x.test", {}) == {"ok": 1}  # a stall is retried like a 503
+    assert stalled[0].closed
+    replies = iter(stalled[1:] + [Response(200, chunks=(b" " for _ in range(10_000)))])
+    with pytest.raises(jev.ModelError, match="did not finish"):
         jev.post_json("https://x.test", {})
 
 

@@ -38,6 +38,7 @@ TIE = 0.5
 TOP_K = 3
 GUARD_HREF = 14
 FILLED = "[filled]"  # snapshot.js's stand-in for a sensitive field's value  # position of the href attribute in snapshot.js's cache.guard tuple
+REPLY_DEADLINE = 30  # seconds for a whole model reply, whatever keeps the connection alive
 _HTTP = requests.Session()
 _HTTP.max_redirects = 0  # Never forward a provider key via a redirect.
 
@@ -46,8 +47,32 @@ class ModelError(RuntimeError):
     """A model call failed; nothing was executed in the browser."""
 
 
+class ReplyStalled(ModelError):
+    """The provider kept a reply open without finishing it."""
+
+
 def api_key():
     return get("JEV_OPENROUTER_KEY") or get("OPENROUTER_API_KEY") or ""
+
+
+def read_reply(response):
+    """The whole reply within a wall-clock deadline. The request timeout bounds each
+    read only, so a provider keeping an unfinished reply alive with whitespace (seen
+    live for minutes) could otherwise hold the task far past its own deadline."""
+    budget = current.get()
+    allowed = REPLY_DEADLINE if budget is None else min(REPLY_DEADLINE, budget.timeout - (time.monotonic() - budget.started))
+    deadline = time.monotonic() + max(0.001, allowed)
+    data = bytearray()
+    try:
+        for chunk in response.iter_content(65536):
+            data.extend(chunk)
+            if time.monotonic() > deadline:
+                raise ReplyStalled("Model provider did not finish its reply in time; no action executed.")
+    except requests.RequestException:
+        raise ModelError("Model connection failed; no action executed.") from None
+    finally:
+        response.close()
+    return bytes(data)
 
 
 def post_json(url, body, *, frame=None, vision_run=None):
@@ -68,16 +93,22 @@ def post_json(url, body, *, frame=None, vision_run=None):
             vision_run.request(frame)
         try:
             response = _HTTP.post(url, json=body, headers={"Authorization": f"Bearer {key}"},
-                                  timeout=request_timeout(25))
+                                  timeout=request_timeout(25), stream=True)
         except requests.RequestException:
             raise ModelError("Model connection failed; no action executed.") from None
         if response.status_code in {429, 503, 529} and attempt < 2:
+            response.close()
             time.sleep(0.5 * 2**attempt)
             continue
         if response.status_code >= 400:
+            response.close()
             raise ModelError(f"Model provider returned HTTP {response.status_code}; no action executed.")
         try:
-            result = response.json()
+            result = json.loads(read_reply(response))
+        except ReplyStalled:
+            if attempt < 2:
+                continue  # transient, like a 503: the next attempt usually answers at once
+            raise
         except ValueError:
             raise ModelError("Model provider returned a non-JSON reply; no action executed.") from None
         if isinstance(result, dict) and (budget := current.get()):

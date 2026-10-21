@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Bound each model reply by a 30 s wall-clock deadline and retry a stalled reply
+  like a 503. The request timeout only bounded each read, so a provider keeping
+  an unfinished reply alive held tasks for 5-10 minutes in live runs.
 - **Rebuild the browser image.** `snapshot.js` changed, so its hash changed: clients
   of this version need the image built from it for visual observations, and older
   clients against the new image pause visual tasks with `vision_capture_failed`
