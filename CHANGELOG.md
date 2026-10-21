@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **Rebuild the browser image.** `snapshot.js` changed, so its hash changed: clients
+  of this version need the image built from it for visual observations, and older
+  clients against the new image pause visual tasks with `vision_capture_failed`
+  until they upgrade.
+- Sensitive fields that are filled show `[filled]` (never the value) and are not
+  offered to Jev for typing, so a field the supervisor filled no longer pauses
+  `sensitive_action` again.
+- Date, time, datetime-local, month, week, color and range inputs are observed,
+  with `input_type` in the element. Date and time values are set with Playwright's
+  fill (ISO format; the text helper is told the format); color and range values
+  are set inside the executor's target check.
+- Browser image: a click whose target the page replaced before the click was
+  dispatched returns 409 `target_replaced` after the first attempt instead of
+  about 12 s of fallbacks and a 422; the client treats it as not delivered.
+- After an `uncertain` step, `DONE` needs the goal check at 0.9 or more;
+  otherwise the task pauses with `action_uncertain` instead of reporting done.
+- Browser image: downloads are listed as soon as they start (`state:
+  in_progress`, separate `CAMOFOX_DOWNLOAD_PATCH` build arg), so a large download
+  counts as started right after its click.
+
 - Record a click the browser abandoned after sending it (a 409/422 from the input
   itself) as a step with `effect`: `taken` when the page moved, otherwise
   `uncertain`. Previously a click that navigated to a slow page vanished from
