@@ -376,3 +376,13 @@ def test_reopen_replaces_the_tab_in_the_same_identity(stub):
 def test_a_tab_this_client_did_not_open_is_not_reopened(stub):
     assert Page(Camofox(stub.url, "shared", "their-tab")).recover("https://a.test/", lambda url: None) is False
     assert stub.requests == []
+
+
+def test_a_supervisor_key_press_needs_a_fresh_page_and_settles_before_the_next_read():
+    cf, state = FakeCamofox(), make_state()
+    page = Page(cf)
+    page.press("ArrowDown", state)
+    page.observe()
+    assert cf.calls[0] == ("press", "ArrowDown") and ("settle",) in cf.calls
+    with pytest.raises(StalePage):
+        Page(FakeCamofox(fresh=False)).press("Enter", state)

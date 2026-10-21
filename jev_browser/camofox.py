@@ -362,7 +362,7 @@ class Page:
         if not self.fresh(page):
             raise StalePage("Page changed since this decision. Observe again.")
         self.cf.press(key)
-        self.after_input = None
+        self.after_input = {"kind": "press"}  # let a highlighted option settle before the next read
 
     def act(self, action, page, text=None):
         if not self.fresh(page, action):
