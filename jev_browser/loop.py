@@ -141,7 +141,8 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                 if using_vision:
                     frame = capture()
                     state = cleared = frame.state
-                    decision = choose(state, goal, history, frame=frame, vision_run=visual)
+                    decision = choose(state, goal, history, frame=frame, vision_run=visual,
+                                      target_floor=max(min_target_confidence, strict))
                 else:
                     decision = choose(state, goal, history)
                 current.get().check()
@@ -173,7 +174,9 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                     return result("paused", choice.lower())
                 target_confidence = decision["target_confidence"]
                 if decision["confidence"] < max(min_confidence, strict) or (
-                    target_confidence is not None and target_confidence < max(min_target_confidence, strict)
+                    # A box-resolved target was picked among observed candidates by pixels instead.
+                    target_confidence is not None and decision.get("target_source") != "box"
+                    and target_confidence < max(min_target_confidence, strict)
                 ):
                     if escalate():
                         continue

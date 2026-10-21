@@ -143,17 +143,19 @@ def test_box_requires_presence_valid_edges_and_unique_observed_target():
     f = frame()
     action = f.safe["actions"][0]
     box = {"box": {"top": 0.03, "bottom": 0.1, "left": 0.03, "right": 0.1}, "confidence": 0.9}
-    vision.validate_box(box, {"noul": 0.99}, f, action)
+    assert vision.box_target(box, {"noul": 0.99}, f, [action]) is action
     for bad in [dict(box, confidence=0.1), dict(box, box={**box["box"], "left": -1}),
                 dict(box, box={**box["box"], "right": math.nan}), {},
                 dict(box, box={**box["box"], "top": 0.9})]:
         with pytest.raises(vision.VisionUnavailable):
-            vision.validate_box(bad, {"noul": 0.99}, f, action)
+            vision.box_target(bad, {"noul": 0.99}, f, [action])
     with pytest.raises(vision.VisionUnavailable):
-        vision.validate_box(box, {"noul": 0.2}, f, action)
+        vision.box_target(box, {"noul": 0.2}, f, [action])
+    with pytest.raises(vision.VisionUnavailable):  # an observed control outside the shortlist
+        vision.box_target(box, {"noul": 0.99}, f, [{**action, "node": 9}])
     f.safe["actions"].append({**action, "node": 2})
     with pytest.raises(vision.VisionUnavailable):
-        vision.validate_box(box, {"noul": 0.99}, f, action)
+        vision.box_target(box, {"noul": 0.99}, f, [action])
 
 
 def test_masked_transport_is_bounded_and_never_falls_back_to_raw_screenshot(stub):

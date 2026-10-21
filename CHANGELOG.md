@@ -9,6 +9,9 @@
   value and `href`) before the target floor, so duplicate links no longer pause.
 - Keep the strict 0.8 visual floors for `require_visual` runs only. Auto-escalated
   and `always` runs keep the text floors instead of pausing right after escalating.
+- With `JEV_VISION_BOX=1`, use per-operation box answers (asked in the same request,
+  with the goal and operation) to break uncertain or split target choices among
+  the three most probable observed controls, instead of only ever pausing.
 - Update the browser image's MCP TypeScript SDK pin to 1.32.1 so fresh builds
   pass the current dependency security audit.
 

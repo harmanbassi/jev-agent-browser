@@ -204,7 +204,13 @@ class Frame:
             return before.crop(box).tobytes() == after.crop(box).tobytes()
 
 
-def validate_box(answer, presence, frame, action):
+def box_target(answer, presence, frame, candidates):
+    """The one shortlisted, observed candidate a box points at, or a safe pause.
+
+    The box only selects among targets Jev already offered and the executor will
+    re-validate; its coordinates are never clicked. The box centre must hit exactly
+    one observed control, and that control must be on the shortlist.
+    """
     try:
         values = answer["box"]
         top, bottom, left, right = (values[k] for k in ("top", "bottom", "left", "right"))
@@ -221,7 +227,9 @@ def validate_box(answer, presence, frame, action):
             r = frame.rect(candidate)
             if r["x"] <= x <= r["x"] + r["w"] and r["y"] <= y <= r["y"] + r["h"]:
                 nodes.add(candidate["node"])
-        if nodes != {action["node"]}:
+        hits = [c for c in candidates if {c["node"]} == nodes]
+        if len(hits) != 1:
             raise ValueError
+        return hits[0]
     except (KeyError, TypeError, ValueError):
         raise VisionUnavailable("vision_target_ambiguous") from None

@@ -26,6 +26,11 @@ CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 # to clear the usual confidence floors before anything executes.
 GOAL_MET = 0.9
 GOAL_UNMET = 0.2
+# With JEV_VISION_BOX, the box breaks an uncertain target choice: below the floor,
+# or the runner-up class has at least TIE of the leader's probability. The box may
+# only pick one of the TOP_K most probable observed classes.
+TIE = 0.5
+TOP_K = 3
 GUARD_HREF = 14  # position of the href attribute in snapshot.js's cache.guard tuple
 _HTTP = requests.Session()
 _HTTP.max_redirects = 0  # Never forward a provider key via a redirect.
@@ -163,7 +168,7 @@ STOPS = {
 }
 
 
-def choose(state, goal, history, *, frame=None, vision_run=None):
+def choose(state, goal, history, *, frame=None, vision_run=None, target_floor=0.0):
     guards = state.get("guards") or {}
     if frame is not None:
         state = frame.safe
@@ -220,10 +225,16 @@ def choose(state, goal, history, *, frame=None, vision_run=None):
         body["model"] = vision_run.settings.model
         body["state"] = [body["state"], frame.image_part()]
         if vision_run.settings.box:
-            questions["target_present"] = {"type": "noul", "instructions":
-                {"goal": goal, "question": "Is the next interactive target visibly present?"}}
-            questions["target_box"] = {"type": "box", "instructions":
-                {"goal": goal, "question": "Locate the next interactive target in the image."}}
+            # One pair per operation, in the same request: the box is only read for
+            # the operation chosen, and only to break an uncertain target choice.
+            for operation in targets:
+                name = operation.lower()
+                questions[name + "_present"] = {"type": "noul", "instructions": {
+                    "goal": goal, "operation": operation,
+                    "question": "Is the element this operation should act on next visibly present in the image?"}}
+                questions[name + "_box"] = {"type": "box", "instructions": {
+                    "goal": goal, "operation": operation,
+                    "question": "Locate the element this operation should act on next in the image."}}
     started = time.perf_counter()
     result = (post_json(get("JEV_URL", DECISIONS_URL), body, frame=frame, vision_run=vision_run)
               if frame is not None else post_json(get("JEV_URL", DECISIONS_URL), body))
@@ -244,7 +255,7 @@ def choose(state, goal, history, *, frame=None, vision_run=None):
         operation = max(rest, key=rest.get)
         confidence = choice_confidence(p / total for p in rest.values()) if total else 0.0
         goal_check = "unmet"
-    target_confidence = None
+    target_confidence = target_source = None
     if operation in targets:
         # Unused target heads cannot cause an action. Validate the head the operation selected.
         target_answer = validate_choice(answers.get(operation.lower() + "_target", {}), targets[operation])
@@ -253,12 +264,18 @@ def choose(state, goal, history, *, frame=None, vision_run=None):
         if len(classes) < len(targets[operation]):
             probabilities = target_answer["probabilities"]
             index = classes[0][0]  # the first observed member; the executor still validates it
-            target_confidence = choice_confidence(sum(probabilities[i] for i in c) for c in classes)
+            target_confidence = choice_confidence(sum(target_answer["probabilities"][i] for i in c) for c in classes)
+        probabilities = target_answer["probabilities"]
+        mass = [sum(probabilities[i] for i in c) for c in classes]
+        if (frame is not None and vision_run.settings.box
+                and (target_confidence < target_floor or len(mass) > 1 and mass[1] >= TIE * mass[0])):
+            from .vision import box_target
+            shortlist = [targets[operation][i] for c in classes[:TOP_K] for i in c]
+            name = operation.lower()
+            picked = box_target(answers.get(name + "_box", {}), answers.get(name + "_present", {}), frame, shortlist)
+            index = next(i for i, a in targets[operation].items() if a is picked)
+            target_source = "box"
         choice = targets[operation][index]["id"]
-        if frame is not None and vision_run.settings.box:
-            from .vision import validate_box
-            validate_box(answers.get("target_box", {}), answers.get("target_present", {}), frame,
-                         targets[operation][index])
     else:
         choice = controls[operation]["id"] if operation in controls else operation
     return {
@@ -268,6 +285,7 @@ def choose(state, goal, history, *, frame=None, vision_run=None):
         "target_confidence": target_confidence,
         "completion_probability": completion,
         "goal_check": goal_check,
+        "target_source": target_source,
         "latency_ms": round((time.perf_counter() - started) * 1000),
         "usage": result.get("usage", {}),
         "model": result.get("model", body["model"]),

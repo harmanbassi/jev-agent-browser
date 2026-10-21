@@ -24,7 +24,7 @@ Set these in your process's secret/config injection or active Hermes profile:
 | `JEV_VISION_MODE` | `auto` | `off`, `auto`, `always` |
 | `JEV_VISION_MODEL` | `typesafe/jev-1.14` | Tested image model; independently pinned |
 | `JEV_VISION_MAX_CALLS` | `4` | Image HTTP attempts per task (1–32) |
-| `JEV_VISION_BOX` | `0` | Experimental presence + box cross-check |
+| `JEV_VISION_BOX` | `0` | Experimental presence + box tie-break for uncertain targets |
 
 Forward all five variables in MCP clients that filter inherited environment
 variables. Codex's example in the README includes them. Claude Code inherits
@@ -90,9 +90,19 @@ capture that confirms the evidence has not changed during verification. These
 checks are conservative: video, animation and changing ads can cause safe pauses.
 They cannot make concurrent changes from unrelated clients atomic.
 
-Optional Box output is accepted only with positive presence evidence and a
-unique mapping to the already selected DOM target. No model-produced box,
-coordinate, selector or script is executed. Canvas-only and unsupported iframe
+Optional Box output (`JEV_VISION_BOX=1`) breaks uncertain target choices. Each
+image request also asks, per offered operation, whether its target is present
+and where it is, with the goal and operation in the question. The box is read
+only for the chosen operation and only when the target head is below its floor
+or split (the runner-up has at least half the leader's probability). It is
+accepted only with presence of at least 0.95, box confidence of at least 0.8, and
+a box centre that hits exactly one observed control, which must be among the
+three most probable targets. Jev then acts on that observed control through the
+usual pixel/DOM freshness and executor checks; otherwise the task pauses with
+`vision_target_ambiguous`. A confident target choice is not vetoed by the box.
+No model-produced box, coordinate, selector or script is executed. The box stays
+off by default: TypeSafe labels Box as not yet production-ready, and it adds
+output to every image request. Canvas-only and unsupported iframe
 controls still require a supervising agent's manual tools.
 
 ## Common pauses
@@ -103,7 +113,7 @@ controls still require a supervising agent's manual tools.
 - `vision_capture_failed` / `vision_invalid_observation`: capture or protocol validation failed.
 - `vision_budget` / `vision_capture_budget`: resume with an appropriate fresh budget.
 - `vision_completion_unverified`: the image did not establish every requirement.
-- `vision_target_ambiguous`: optional box/presence evidence could not identify one target.
+- `vision_target_ambiguous`: an uncertain target and box/presence evidence that did not identify one observed control.
 - `low_confidence`: operation/target confidence is below the floor (0.8 for `require_visual` runs).
 
 Do not remove a visual requirement merely to get a successful status. Inspect
