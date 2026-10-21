@@ -28,6 +28,20 @@ scripts, preserving the base's Firefox and native SQLite build. It audits the
 result and fails on remaining high/critical npm findings. Repeat scans when
 updating the base; this is not an exhaustive OS/browser security scan.
 
+`examples/Dockerfile` also carries a temporary patch to Camofox 1.18.1's
+`/click` route (`examples/camofox-click-timeout.mjs`). Its DOM-click fallback
+called `locator.evaluate()` without a timeout. When a page re-renders the target
+after it was tagged (a download page swapping in a platform-specific button, an
+autocomplete list re-rendering), that call waited Playwright's 30-second default,
+the route's whole budget, and the server destroyed the tab with HTTP 410. The
+patch bounds it like the adjacent `boundingBox()` call, so the route fails within
+about 12 seconds with its existing 422 and the client observes the page again;
+the tab and its form state survive. The patch step fails the build if the base's
+code differs, so review it whenever the base image changes and drop it once
+upstream bounds that call. Clients that opened their own tab also recover from a
+410 by reopening the last page in the same identity (cookies survive), at most
+twice per task, and report `recoveries` in the result.
+
 ## Upgrade an existing service
 
 Record the existing image, configuration, mounts, port mappings, authentication,

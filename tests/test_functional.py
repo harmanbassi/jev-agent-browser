@@ -50,6 +50,25 @@ Copyright (c) 2026 Fixture Authors</textarea>
 <button onclick="document.getElementById('echo').textContent='Phone length '+document.getElementById('phone').value.length">Send</button>
 <p id="echo"></p>'''
 
+# A late script swaps the target for an identical copy after the executor tagged it
+# (as a download page that detects the visitor's platform does), so the click on the
+# tagged node can never succeed.
+SWAP_HTML = b'''<!doctype html><title>Re-render fixture</title>
+<input aria-label="Kept" value="typed-before-click">
+<div style="position:relative;width:240px;height:60px">
+<button id="old" style="position:absolute;inset:0">Download</button>
+<button id="new" style="position:absolute;inset:0;display:none">Download</button></div>
+<script>let swapped=false;
+new MutationObserver(()=>{
+  if (swapped || !document.getElementById('old').hasAttribute('data-jev-target')) return;
+  swapped=true;
+  const cover=document.createElement('div');
+  cover.style.cssText='position:fixed;inset:0;z-index:9';
+  document.body.append(cover);
+  setTimeout(()=>{document.getElementById('old').style.display='none';
+    document.getElementById('new').style.display='';cover.remove();},1000);
+}).observe(document.getElementById('old'),{attributes:true});</script>'''
+
 
 @pytest.fixture
 def local_provider():
@@ -69,7 +88,7 @@ def local_provider():
             self.wfile.write(data)
 
         def do_GET(self):
-            pages = {"/vision": VISION_HTML, "/overlay": OVERLAY_HTML, "/code": CODE_HTML}
+            pages = {"/vision": VISION_HTML, "/overlay": OVERLAY_HTML, "/code": CODE_HTML, "/swap": SWAP_HTML}
             self.reply(200, pages.get(self.path, HTML), "text/html")
 
         def do_POST(self):
@@ -402,3 +421,38 @@ with Browser() as browser:
                             env=env, capture_output=True, text=True, timeout=90)
     assert result.returncode == 0, result.stdout + result.stderr
     assert seen == []  # the supervisor path makes no model calls
+
+
+SWAP_CHECK = '''import sys, time, uuid
+from jev_browser.camofox import Camofox, Page, StalePage
+from jev_browser.policy import URLPolicy
+identity="jev-swap-"+uuid.uuid4().hex
+cf=Camofox.open(sys.argv[1], identity, identity, sys.argv[3],
+               headers={"Authorization":"Bearer "+sys.argv[2]}, guard=URLPolicy(allow_private=True))
+try:
+    page=Page(cf)
+    state=page.observe()
+    target=next(a for a in state["actions"] if a["label"]=="Download")
+    started=time.monotonic()
+    try:
+        page.act(target, state)
+    except StalePage:
+        pass
+    else:
+        raise AssertionError("a target swapped out after tagging must not count as clicked")
+    assert time.monotonic()-started < 25, time.monotonic()-started
+    state=page.observe()  # the same tab survives, with its form state
+    assert any(a.get("value")=="typed-before-click" for a in state["actions"]), state["actions"]
+finally:
+    cf.close_session()
+'''
+
+
+def test_installed_click_on_a_target_swapped_after_tagging_is_stale_not_a_destroyed_tab(
+        installed_package, local_provider, disposable_browser, tmp_path):
+    port, _ = local_provider
+    url, key = disposable_browser
+    result = subprocess.run([sys.executable, "-c", SWAP_CHECK, url, key, f"http://127.0.0.1:{port}/swap"],
+                            cwd=tmp_path, env={**os.environ, "PYTHONPATH": str(installed_package)},
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr

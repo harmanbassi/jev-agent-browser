@@ -1,6 +1,7 @@
 **
 !examples/
 !examples/Dockerfile
+!examples/camofox-click-timeout.mjs
 !camofox_plugin/
 !camofox_plugin/jev_vision/
 !camofox_plugin/jev_vision/index.js

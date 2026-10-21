@@ -28,6 +28,12 @@
 - Observations include the text of non-sensitive text areas, so code views
   (for example a hosted file's contents) reach Jev. This changes `snapshot.js`:
   rebuild the browser image so the masked-observation plugin matches.
+- Browser image: bound Camofox 1.18.1's DOM-click fallback (a temporary patch
+  that fails the build if the base differs), so a click on a target re-rendered
+  after tagging returns 422 within seconds instead of hanging 30 s and destroying
+  the tab (HTTP 410). Rebuild the browser image to apply it.
+- Clients that opened their own tab reopen the last page in the same identity
+  after an HTTP 410 (at most twice per task) and report `recoveries`.
 - Update the browser image's MCP TypeScript SDK pin to 1.32.1 so fresh builds
   pass the current dependency security audit.
 

@@ -324,3 +324,42 @@ def test_results_report_token_usage_next_to_call_counts(monkeypatch):
 
     assert out["usage"] == {"input_tokens": 900, "output_tokens": 40,
                             "by_model": {"typesafe/jev-1.13": {"input_tokens": 900, "output_tokens": 40}}}
+
+
+class Recoverable(FakePage):
+    def __init__(self, states, gone=1, owned=True):
+        super().__init__(states)
+        self.gone, self.owned, self.reopened = gone, owned, []
+
+    def act(self, action, page, text=None):
+        from jev_browser.camofox import TabGone
+        if self.gone:
+            self.gone -= 1
+            raise TabGone("Camofox /tabs/t/click returned HTTP 410")
+        super().act(action, page, text)
+
+    def recover(self, url, guard):
+        self.reopened.append((url, guard("https://a.test/form")))
+        return self.owned
+
+
+def test_a_destroyed_tab_is_reopened_once_and_the_task_continues(monkeypatch):
+    page = Recoverable([make_state(url="https://a.test/form", marker="a"), make_state(marker="b")])
+    script(monkeypatch, [decision("e2", "CLICK"), decision("e2", "CLICK"), decision("DONE")])
+
+    out = loop.run_task(page, "goal")
+
+    assert out["status"] == "done" and out["recoveries"] == 1 and page.reopened == [("https://a.test/form", None)]
+    assert out["steps"][0]["kind"] == "recover" and out["steps"][0]["url"] == "https://a.test/form"
+    assert page.acted == [("e2", None)]
+
+
+@pytest.mark.parametrize("gone, owned", [(9, True), (1, False)])
+def test_tab_recovery_is_bounded_and_needs_an_owned_tab(monkeypatch, gone, owned):
+    page = Recoverable([make_state()], gone=gone, owned=owned)
+    script(monkeypatch, [decision("e2", "CLICK")] * 9)
+
+    out = loop.run_task(page, "goal")
+
+    assert out["status"] == "error" and "HTTP 410" in out["reason"]
+    assert out.get("recoveries", 0) == (loop.MAX_RECOVERIES if owned else 0)

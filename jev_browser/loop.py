@@ -9,7 +9,7 @@ between calls so a resumed goal knows what already happened.
 
 import time
 
-from .camofox import CamofoxError, StalePage
+from .camofox import CamofoxError, StalePage, TabGone
 from .jev import ModelError, action_space, choose, field_context, field_text, verify_visual
 from .policy import URLPolicy, action_block
 from .budget import Budget, BudgetExceeded, current, limits
@@ -18,6 +18,7 @@ from .vision import VisionRun, VisionSettings, VisionUnavailable
 TEXT_LIMIT = 8000
 ELEMENT_LIMIT = 80
 MAX_STALE = 5
+MAX_RECOVERIES = 2  # reopened tabs per task after the browser destroyed one
 
 
 def run_task(page, goal, *, history=None, max_steps=25, min_confidence=0.35, min_target_confidence=0.2,
@@ -64,6 +65,7 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
     guard = URLPolicy() if guard is None else guard
     history = list(history or [])
     steps, decisions = [], []
+    recoveries = 0
     started = time.perf_counter()
     state = cleared = None  # cleared: the last read page whose URL passed the guard
     frame = None
@@ -102,6 +104,8 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                     out["elements"] = action_space(visible["actions"])[0][:ELEMENT_LIMIT]
         out.update(extra)
         out["steps"] = steps
+        if recoveries:
+            out["recoveries"] = recoveries
         out["jev_calls"] = len(decisions)
         models = list(dict.fromkeys(d["model"] for d in decisions if isinstance(d.get("model"), str)))
         if models:
@@ -203,6 +207,19 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                     state = cleared = fresh.state
                     frame = fresh
                 page.act(action, state, text=text)
+            except TabGone as gone:
+                # A hung browser operation can make the server destroy the tab (HTTP 410).
+                # Cookies survive in the identity: reopen the last page this task cleared.
+                if (recoveries >= MAX_RECOVERIES or cleared is None or not hasattr(page, "recover")
+                        or not page.recover(cleared["url"], guard)):
+                    return result("error", str(gone))
+                recoveries += 1
+                step = {"action": "Reopened the page in a new tab", "kind": "recover", "url": cleared["url"],
+                        "text": None, "page_changed": True}
+                steps.append(step)
+                history.append(step)
+                state = frame = None
+                continue
             except StalePage:
                 stale += 1
                 if stale > MAX_STALE:
