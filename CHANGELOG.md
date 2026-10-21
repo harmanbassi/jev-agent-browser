@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Update the browser image's MCP TypeScript SDK pin to 1.32.1 so fresh builds
+  pass the current dependency security audit.
+
 ## 0.3.0 — opt-in visual browsing
 
 - Masked, authenticated viewport observations with a versioned snapshot protocol.
