@@ -439,3 +439,12 @@ def test_download_detection_is_skipped_where_the_server_has_no_route():
 
 def test_settle_waits_for_a_toggled_control_to_change_state():
     assert "aria-expanded" in camofox.SETTLE_JS and "action.expanded" in camofox.SETTLE_JS
+
+
+def test_a_failed_download_is_not_reported_as_started():
+    cf, state = FakeCamofox(), make_state()
+    listings = iter([[], [{"id": "d1", "suggestedFilename": "setup.exe", "failure": "canceled"}]])
+    cf.downloads = lambda: next(listings)
+    page = Page(cf, sleep=lambda s: None)
+    page.act(action(state, "e2"), state)
+    assert page.new_downloads(wait=0) == []

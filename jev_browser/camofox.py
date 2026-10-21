@@ -387,7 +387,7 @@ class Page:
             new = [item for item in items if item.get("id") not in self.download_ids]
             if new or time.monotonic() >= deadline:
                 self.download_ids |= {item.get("id") for item in new}
-                return [str(item.get("suggestedFilename") or "download") for item in new]
+                return [str(item.get("suggestedFilename") or "download") for item in new if not item.get("failure")]
             self.sleep(0.25)
 
     def recover(self, url, guard):
