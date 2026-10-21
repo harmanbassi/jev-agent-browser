@@ -482,3 +482,16 @@ def test_a_click_that_starts_a_download_is_recorded_and_never_repeated(monkeypat
     assert out["status"] == "paused" and out["reason"] == "download_started"
     assert out["downloads"] == ["python-3.15.1.exe"] and page.acted == [("e2", None)]
     assert out["steps"][0]["download"] == "python-3.15.1.exe" and seen[1][0]["download"] == "python-3.15.1.exe"
+
+
+def test_a_download_that_lands_after_its_click_still_stops_a_repeat(monkeypatch):
+    # A large file is listed only once saved, after the click's own short check.
+    page = Downloading([make_state(url="https://a.test/downloads/")])
+    checks = iter([[], ["python-3.15.1.tar.xz"]])
+    page.new_downloads = lambda: next(checks)
+    script(monkeypatch, [decision("e2", "CLICK"), decision("e2", "CLICK")])
+
+    out = loop.run_task(page, "download the latest release")
+
+    assert out["reason"] == "download_started" and page.acted == [("e2", None)]
+    assert out["steps"][0]["download"] == "python-3.15.1.tar.xz"

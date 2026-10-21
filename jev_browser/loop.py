@@ -222,8 +222,15 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                 action = next(a for a in state["actions"] if a["id"] == choice)
                 if reason := action_block(action):
                     return result("paused", reason)
-                if any(h.get("download") and (h.get("action"), h.get("kind"), h.get("from_url"))
-                       == (action["label"], action["kind"], state["url"]) for h in history):
+                same = (action["label"], action["kind"], state["url"])
+                last = history[-1] if history else {}
+                if (last.get("page_changed") is False and not last.get("download") and hasattr(page, "new_downloads")
+                        and (last.get("action"), last.get("kind"), last.get("from_url")) == same):
+                    # About to repeat a click that changed nothing: its download may have landed since.
+                    if files := page.new_downloads():
+                        last["download"] = files[0]
+                if any(h.get("download") and (h.get("action"), h.get("kind"), h.get("from_url")) == same
+                       for h in history):
                     return result("paused", "download_started")  # never fetch the same file again
                 text = None
                 if action["kind"] == "fill":

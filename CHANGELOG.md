@@ -17,7 +17,8 @@
   changes, so menus that open late (a flight search's ticket type) are observed.
 - Detect clicks that start a file download (listed by the browser's downloads
   route), record the file in the step and `downloads`, and pause with
-  `download_started` instead of clicking it again.
+  `download_started` instead of clicking it again. A large file that is listed
+  only after the click's short check is attributed before any repeat.
 - Ask a goal check with every decision (same request). A confident yes finishes
   only where the operation head leaves room (it gives `DONE` at least 0.15 or
   its action is below the floor), never over `NEED_GUIDANCE`/`BLOCKED`. A
