@@ -3,7 +3,7 @@ import json
 import pytest
 import requests
 
-from jev_browser import jev
+from jev_browser import camofox, jev
 
 from helpers import make_state
 
@@ -223,3 +223,68 @@ def test_done_contradicted_by_the_goal_check_continues_with_the_next_best_operat
 def test_done_is_kept_when_the_goal_check_is_unsure(monkeypatch, key):
     monkeypatch.setattr(jev, "post_json", goal_reply("DONE", 0.5))
     assert jev.choose(make_state(), "goal", [])["choice"] == "DONE"
+
+
+def guard(label, href=None, role="link"):
+    """A snapshot.js cache.guard tuple; index 14 is the element's href attribute."""
+    return [0, role, label, None, None, None, None, None, None, False, None, None, None, None, href, "scope"]
+
+
+def duplicates(*controls):
+    """Click targets from (label, href, role) tuples, with matching executor guards."""
+    actions = [{"id": f"e{n}", "kind": "click", "node": n, "label": label, "role": role, "value": ""}
+               for n, (label, href, role) in enumerate(controls, 1)]
+    state = make_state(actions=actions)
+    state["guards"] = {str(n): guard(label, href, role) for n, (label, href, role) in enumerate(controls, 1)}
+    return state
+
+
+def split_reply(probabilities, choice):
+    def post_json(url, body):
+        ops = list(body["questions"]["operation"]["criteria"])
+        targets = list(body["questions"]["click_target"]["criteria"])
+        target = {"choice": choice, "probabilities": {i: probabilities.get(i, 0.0) for i in targets},
+                  "confidence": choice_confidence_of(probabilities, len(targets))}
+        return {"answers": {"operation": answer("CLICK", ops, 0.9), "click_target": target}}
+    return post_json
+
+
+def choice_confidence_of(probabilities, n):
+    return (max(probabilities.values()) - 1 / n) / (1 - 1 / n)
+
+
+def test_equivalent_links_pool_their_probability_and_act_on_the_first(monkeypatch, key):
+    state = duplicates(("Downloads", "/downloads/", "link"), ("About", "/about/", "link"),
+                       (" downloads ", "/downloads/", "link"))
+    monkeypatch.setattr(jev, "post_json", split_reply({"1": 0.44, "2": 0.12, "3": 0.44}, "3"))
+    d = jev.choose(state, "open the downloads page", [])
+    assert d["choice"] == "e1"  # the first observed member; the executor still validates it
+    assert d["target_confidence"] == pytest.approx(jev.choice_confidence([0.88, 0.12]))
+
+
+@pytest.mark.parametrize("controls", [
+    [("Delete", None, "button"), ("Delete", None, "button")],  # no shared destination
+    [("Downloads", "/downloads/", "link"), ("Downloads", "/downloads/mac/", "link")],
+    [("Downloads", "/downloads/", "link"), ("Get Python", "/downloads/", "link")],
+    [("Downloads", "/downloads/", "link"), ("Downloads", "/downloads/", "button")],
+])
+def test_different_targets_are_never_pooled(monkeypatch, key, controls):
+    monkeypatch.setattr(jev, "post_json", split_reply({"1": 0.5, "2": 0.5}, "2"))
+    d = jev.choose(duplicates(*controls), "goal", [])
+    assert d["choice"] == "e2" and d["target_confidence"] == 0.0
+
+
+def test_the_guard_layout_still_carries_href_at_index_14():
+    source = camofox.READ_STATE
+    body = source[source.index("cache.guard=e=>{"):]
+    fields = body[body.index("return [") + len("return ["):body.index("];")]
+    depth, parts, part = 0, [], ""
+    for char in fields:
+        depth += char in "([{" and 1 or char in ")]}" and -1 or 0
+        if char == "," and depth == 0:
+            parts.append(part.strip())
+            part = ""
+        else:
+            part += char
+    parts.append(part.strip())
+    assert parts[jev.GUARD_HREF] == "e.getAttribute('href')"

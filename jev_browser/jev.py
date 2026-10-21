@@ -26,6 +26,7 @@ CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 # to clear the usual confidence floors before anything executes.
 GOAL_MET = 0.9
 GOAL_UNMET = 0.2
+GUARD_HREF = 14  # position of the href attribute in snapshot.js's cache.guard tuple
 _HTTP = requests.Session()
 _HTTP.max_redirects = 0  # Never forward a provider key via a redirect.
 
@@ -102,6 +103,26 @@ def noul(answer):
     return value if type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1 else None
 
 
+def equivalent(candidates, probabilities, guards):
+    """Target indices grouped into equivalence classes, most probable class first.
+
+    Duplicate controls (a story title and its "comments" link, a header and footer
+    "Downloads") split Jev's probability between them. Only targets with the same
+    kind, role, normalized label, value AND destination are pooled; without a
+    shared href (most buttons and fields) nothing merges. Ties keep observation order.
+    """
+    classes = {}
+    for index, action in candidates.items():
+        guard = guards.get(str(action.get("node")))
+        href = guard[GUARD_HREF] if isinstance(guard, list) and len(guard) > GUARD_HREF else None
+        key = index
+        if isinstance(href, str) and href:
+            key = (action["kind"], action.get("role"), " ".join(action["label"].split()).casefold(),
+                   action.get("value"), href)
+        classes.setdefault(key, []).append(index)
+    return sorted(classes.values(), key=lambda c: -sum(probabilities[i] for i in c))
+
+
 def action_space(actions):
     """One index per observed element; each operation has its own valid target choices."""
     elements, indices, targets, controls = [], {}, {}, {}
@@ -143,6 +164,7 @@ STOPS = {
 
 
 def choose(state, goal, history, *, frame=None, vision_run=None):
+    guards = state.get("guards") or {}
     if frame is not None:
         state = frame.safe
     elements, targets, controls = action_space(state["actions"])
@@ -226,12 +248,17 @@ def choose(state, goal, history, *, frame=None, vision_run=None):
     if operation in targets:
         # Unused target heads cannot cause an action. Validate the head the operation selected.
         target_answer = validate_choice(answers.get(operation.lower() + "_target", {}), targets[operation])
-        choice = targets[operation][target_answer["choice"]]["id"]
-        target_confidence = target_answer["confidence"]
+        index, target_confidence = target_answer["choice"], target_answer["confidence"]
+        classes = equivalent(targets[operation], target_answer["probabilities"], guards)
+        if len(classes) < len(targets[operation]):
+            probabilities = target_answer["probabilities"]
+            index = classes[0][0]  # the first observed member; the executor still validates it
+            target_confidence = choice_confidence(sum(probabilities[i] for i in c) for c in classes)
+        choice = targets[operation][index]["id"]
         if frame is not None and vision_run.settings.box:
             from .vision import validate_box
             validate_box(answers.get("target_box", {}), answers.get("target_present", {}), frame,
-                         targets[operation][target_answer["choice"]])
+                         targets[operation][index])
     else:
         choice = controls[operation]["id"] if operation in controls else operation
     return {

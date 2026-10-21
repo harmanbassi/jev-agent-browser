@@ -5,6 +5,8 @@
 - Ask a goal check with every decision (same request): finish on a confident yes,
   overrule an unsupported `DONE` on a confident no, and report
   `completion_probability` / `done_by` in results.
+- Pool the probability of equivalent targets (same kind, role, normalized label,
+  value and `href`) before the target floor, so duplicate links no longer pause.
 - Update the browser image's MCP TypeScript SDK pin to 1.32.1 so fresh builds
   pass the current dependency security audit.
 

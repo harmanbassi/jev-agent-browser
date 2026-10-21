@@ -57,7 +57,9 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
     separate live probe, leaves no gap for a redirect to slip through.
     Target confidence has its own, lower floor: Jev splits probability between
     near-identical targets (e.g. duplicate autocomplete suggestions), so the right
-    click often scores 0.4-0.5 (live Wikipedia runs, 2026-09-29).
+    click often scores 0.4-0.5 (live Wikipedia runs, 2026-09-29). Targets that share a
+    destination are pooled before this floor applies (jev.equivalent); suggestions
+    without one still split.
     """
     guard = URLPolicy() if guard is None else guard
     history = list(history or [])

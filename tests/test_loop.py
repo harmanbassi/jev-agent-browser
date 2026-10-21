@@ -263,3 +263,17 @@ def test_results_report_the_last_goal_check(monkeypatch):
     out = loop.run_task(page, "goal")
 
     assert out["status"] == "done" and out["completion_probability"] == 0.97 and out["done_by"] == "goal_check"
+
+
+def test_duplicate_links_no_longer_split_the_target_below_the_floor(monkeypatch):
+    from test_jev import duplicates, split_reply
+    from jev_browser import jev
+    before = duplicates(("Comments", "item?id=1", "link"), ("Hide", "hide?id=1", "link"),
+                        ("Comments", "item?id=1", "link"))
+    page = FakePage([before, make_state(marker="after")])
+    monkeypatch.setenv("JEV_OPENROUTER_KEY", "test-key")
+    monkeypatch.setattr(jev, "post_json", split_reply({"1": 0.45, "2": 0.1, "3": 0.45}, "1"))
+
+    out = loop.run_task(page, "open the comments", max_steps=1)
+
+    assert page.acted == [("e1", None)] and out["reason"] == "step_budget"

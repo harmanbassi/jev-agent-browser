@@ -133,6 +133,11 @@ keep going; a confident no (at most 0.2) overrules a `DONE` choice, and the
 next-best operation must still clear the usual confidence floors. Goals that
 ask for an action (open, submit, send) are not met by a page that only offers it.
 
+Duplicate links (the same label and the same `href`, such as a header and footer
+"Downloads") share their probability before the target confidence floor applies,
+and Jev acts on the first observed one. Controls without a shared destination,
+such as two buttons with the same text, are never pooled.
+
 ## Optional visual browsing
 
 Jev 1.14 can use images alongside page text. Vision is **off by default** and
