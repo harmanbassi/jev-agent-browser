@@ -40,7 +40,11 @@ example.com image and make a paid provider request. Both clean up their own tab.
 Use `require_visual=true` for images, appearance, colors or layout. This starts
 visual reasoning immediately and refuses a DOM-only completion. In `auto`,
 ordinary text tasks escalate once on uncertain/blocked/no-progress decisions.
-After escalation, images remain required for the rest of that run.
+After escalation, images remain required for the rest of that run. Only
+`require_visual` runs use the strict 0.8 operation/target confidence floors;
+escalated and `always` runs keep the text floors (0.35 operation, 0.2 target)
+and still need visual completion verification. The one escalation is reported
+as `vision.escalations`.
 `vision=always` starts visually; `vision=off` disables images for that task.
 An agent cannot grant itself operator permission.
 
@@ -100,7 +104,7 @@ controls still require a supervising agent's manual tools.
 - `vision_budget` / `vision_capture_budget`: resume with an appropriate fresh budget.
 - `vision_completion_unverified`: the image did not establish every requirement.
 - `vision_target_ambiguous`: optional box/presence evidence could not identify one target.
-- `low_confidence`: visual operation/target confidence is below the conservative floor.
+- `low_confidence`: operation/target confidence is below the floor (0.8 for `require_visual` runs).
 
 Do not remove a visual requirement merely to get a successful status. Inspect
 returned evidence and explain limitations to the user.

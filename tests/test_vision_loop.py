@@ -180,3 +180,16 @@ def test_verification_receives_executed_history_and_records_probability(monkeypa
     assert jev.verify_visual(frame(), 'Choose red', visual, history)
     assert seen[0]['state'][0]['executed_actions'] == history
     assert visual.summary()['completion_probability'] == .99
+
+
+@pytest.mark.parametrize("mode", ["auto", "always"])
+def test_only_required_visual_runs_use_the_strict_floors(monkeypatch, mode):
+    page = VisualPage([frame()])
+    escalation = [decision("BLOCKED")] if mode == "auto" else []
+    decisions = iter([*escalation, decision("e1", "CLICK", confidence=.6, target_confidence=.5),
+                      decision("DONE", confidence=.6)])
+    monkeypatch.setattr(loop, "choose", lambda *a, **k: next(decisions))
+    monkeypatch.setattr(loop, "verify_visual", lambda *a: True)
+    out = run(page, vision=mode)
+    assert out["status"] == "done" and page.acted == [("e1", None)]
+    assert out["vision"]["escalations"] == (1 if mode == "auto" else 0) and out["vision"]["verified"]

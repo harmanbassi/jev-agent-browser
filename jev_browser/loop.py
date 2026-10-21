@@ -68,6 +68,10 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
     state = cleared = None  # cleared: the last read page whose URL passed the guard
     frame = None
     using_vision = vision_mode == "always" or visual.required
+    # Strict floors only where visual verification is the point. An auto-escalated
+    # (or always-on) run keeps the text floors: it escalated because it was unsure,
+    # and jumping to 0.8 made every escalated run pause anyway.
+    strict = 0.8 if visual.required else 0
 
     def capture():
         if not hasattr(page, "observe_vision"):
@@ -147,7 +151,7 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                     if not page.fresh(state):
                         raise StalePage("Page changed since the decision.")
                     if choice == "DONE":
-                        if decision["confidence"] < max(min_confidence, 0.8 if using_vision else 0):
+                        if decision["confidence"] < max(min_confidence, strict):
                             if escalate():
                                 continue
                             return result("paused", "low_confidence", confidence=decision["confidence"])
@@ -168,8 +172,8 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                         continue
                     return result("paused", choice.lower())
                 target_confidence = decision["target_confidence"]
-                if decision["confidence"] < max(min_confidence, 0.8 if using_vision else 0) or (
-                    target_confidence is not None and target_confidence < max(min_target_confidence, 0.8 if using_vision else 0)
+                if decision["confidence"] < max(min_confidence, strict) or (
+                    target_confidence is not None and target_confidence < max(min_target_confidence, strict)
                 ):
                     if escalate():
                         continue

@@ -7,6 +7,8 @@
   `completion_probability` / `done_by` in results.
 - Pool the probability of equivalent targets (same kind, role, normalized label,
   value and `href`) before the target floor, so duplicate links no longer pause.
+- Keep the strict 0.8 visual floors for `require_visual` runs only. Auto-escalated
+  and `always` runs keep the text floors instead of pausing right after escalating.
 - Update the browser image's MCP TypeScript SDK pin to 1.32.1 so fresh builds
   pass the current dependency security audit.
 
