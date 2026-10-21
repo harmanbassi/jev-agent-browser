@@ -84,7 +84,9 @@ def create_server(browser=None):
         (value = a key such as Enter, Tab, Escape, ArrowDown; sent to the focused element)
         or scroll (value = up or down). element_id is an `index` from the latest
         browser_snapshot or browser_act result; a changed page invalidates them. Typed
-        values are never sent to the decision model. Refused while a task runs.
+        values are not sent to the decision model by this call or kept in history, but
+        later observations show non-sensitive field values like other page content.
+        Refused while a task runs.
         """
         return await asyncio.to_thread(browser.act, session_id, element_id, action, value)
 

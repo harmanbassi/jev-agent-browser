@@ -49,5 +49,7 @@ def test_image_bounds_the_dom_click_fallback_or_fails_the_build(tmp_path):
 def test_dockerfile_applies_the_click_patch_and_the_build_context_includes_it():
     repo = PLUGIN.parents[1]
     dockerfile = (repo / "examples/Dockerfile").read_text()
-    assert "RUN node /tmp/camofox-click-timeout.mjs /app/server.js" in dockerfile
+    assert "ARG CAMOFOX_CLICK_PATCH=1" in dockerfile.split("FROM ", 1)[1]  # in scope after FROM
+    assert 'if [ "$CAMOFOX_CLICK_PATCH" = "1" ]; then node /tmp/camofox-click-timeout.mjs /app/server.js; fi' in dockerfile
+    assert "CAMOFOX_CLICK_PATCH=0" in (repo / "docs/camofox-operations.md").read_text()
     assert "!examples/camofox-click-timeout.mjs" in (repo / ".dockerignore").read_text().splitlines()

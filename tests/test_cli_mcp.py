@@ -201,3 +201,14 @@ def test_mcp_forwards_visual_controls_and_advertises_requirement():
         assert result.structured_content['status'] == 'paused'
     asyncio.run(exercise())
     assert seen[0]['vision'] == 'always' and seen[0]['require_visual']
+
+
+def test_browser_act_does_not_overstate_what_stays_from_the_model():
+    pytest.importorskip("mcp")
+    from jev_browser.mcp_server import create_server
+
+    async def describe():
+        return next(t for t in await create_server(FakeBrowser()).list_tools() if t.name == "browser_act").description
+
+    text = " ".join(asyncio.run(describe()).split())
+    assert "never sent" not in text and "by this call" in text and "later observations" in text
