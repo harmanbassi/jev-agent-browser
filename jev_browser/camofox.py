@@ -12,6 +12,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 import requests
 
@@ -101,6 +102,10 @@ class CamofoxReadTimeout(CamofoxError):
 
 class CamofoxAuthError(CamofoxError):
     """The browser rejected credentials or denied a protected operation."""
+
+
+class ActionUncertain(StalePage):
+    """The browser gave up on an input after the target check passed: it may have taken effect."""
 
 
 class TabGone(CamofoxError):
@@ -256,6 +261,14 @@ class Camofox:
                 raise error
             logging.getLogger(__name__).warning("Camofox resize failed; verified readable page and continuing with the current viewport")
 
+    def downloads(self):
+        """Files the browser captured in this tab (metadata only, never file data)."""
+        reply = self._request("get", f"/tabs/{self.tab_id}/downloads?userId={quote(self.user_id, safe='')}")
+        items = reply.get("downloads") if isinstance(reply, dict) else None
+        if not isinstance(items, list):
+            raise CamofoxError("Camofox downloads reply was malformed")
+        return [item for item in items if isinstance(item, dict)]
+
     def close(self):
         if self.tab_id:
             try:
@@ -291,6 +304,7 @@ class Page:
         self.sleep = sleep
         self.after_input = None
         self.sized = False
+        self.download_ids = None  # baseline before the first click; False when unsupported
 
     def observe(self):
         if not self.sized:  # first touch of the tab; inside the loop's error handling, not __init__
@@ -351,6 +365,31 @@ class Page:
             return current == [page["page_key"], page["guards"].get(str(node))]
         return self.cf.evaluate(MARKER) == page["marker"]
 
+    def _download_ids(self):
+        if not hasattr(self.cf, "downloads"):
+            return False  # a custom driver without download listing
+        try:
+            return {item.get("id") for item in self.cf.downloads()}
+        except (CamofoxError, StalePage):
+            return False  # servers without the route: no download detection
+
+    def new_downloads(self, wait=2.0):
+        """Filenames the browser saved since the last check. A download is listed only
+        once the file is saved, so a click that left the page unchanged waits briefly."""
+        if self.download_ids is None or self.download_ids is False:
+            return []
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                items = self.cf.downloads()
+            except (CamofoxError, StalePage):
+                return []
+            new = [item for item in items if item.get("id") not in self.download_ids]
+            if new or time.monotonic() >= deadline:
+                self.download_ids |= {item.get("id") for item in new}
+                return [str(item.get("suggestedFilename") or "download") for item in new]
+            self.sleep(0.25)
+
     def recover(self, url, guard):
         """Reopen `url` in a new tab after the server destroyed ours. Only for tabs this
         client opened: a shared tab belongs to whoever manages it."""
@@ -381,9 +420,17 @@ class Page:
             point = self.cf.evaluate(TARGET_JS + "(" + json.dumps(action) + ")")
             if point is None:
                 raise StalePage("Target changed or is covered. Observe again.")
-            if kind in {"click", "fill"}:
-                self.cf.click_at(point["x"], point["y"], TARGET_SELECTOR)
-            if kind == "fill":
-                self.cf.press("Control+a")
-                self.cf.type_text(text)
+            if kind == "click" and self.download_ids is None:
+                self.download_ids = self._download_ids()
+            try:
+                if kind in {"click", "fill"}:
+                    self.cf.click_at(point["x"], point["y"], TARGET_SELECTOR)
+                if kind == "fill":
+                    self.cf.press("Control+a")
+                    self.cf.type_text(text)
+            except StalePage as e:
+                # The input passed every check and was sent; the server gave up afterwards
+                # (a click that navigated to a slow page). It may well have taken effect.
+                self.after_input = action
+                raise ActionUncertain(str(e)) from None
         self.after_input = action if kind != "wait" else None

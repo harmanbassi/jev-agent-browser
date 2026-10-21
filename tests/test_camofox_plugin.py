@@ -30,17 +30,27 @@ CLICK_FALLBACK = """      const dispatchDomClick = async (locator) => {
         log('info', 'DOM click dispatched after Playwright click failure');
       };
 """
+FIRST_CLICK = """        try {
+          // First try normal click (respects visibility, enabled, not-obscured)
+          await click({ timeout: 3000 });
+        } catch (err) {
+          // Fallback 1: If intercepted by overlay, retry with force
+"""
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 def test_image_bounds_the_dom_click_fallback_or_fails_the_build(tmp_path):
     patch = PLUGIN.parents[1] / "examples/camofox-click-timeout.mjs"
     server = tmp_path / "server.js"
-    server.write_text("const before = 1;\n" + CLICK_FALLBACK)
+    server.write_text("const before = 1;\n" + CLICK_FALLBACK + FIRST_CLICK)
     out = subprocess.run(["node", str(patch), str(server)], capture_output=True, text=True)
     assert out.returncode == 0, out.stdout + out.stderr
-    assert "}, undefined, { timeout: Math.max(500, Math.min(3000, remainingBudget())) });" in server.read_text()
-    for changed in (server.read_text(), CLICK_FALLBACK * 2, "unrelated"):  # already patched, ambiguous, absent
+    patched = server.read_text()
+    assert "}, undefined, { timeout: Math.max(500, Math.min(3000, remainingBudget())) });" in patched
+    # A click Playwright delivered whose navigation is still loading is a success, not a reason
+    # to force-click a page that has already gone.
+    assert "if (err.message.includes('click action done'))" in patched.split(FIRST_CLICK.splitlines()[3])[1]
+    for changed in (patched, CLICK_FALLBACK * 2 + FIRST_CLICK, CLICK_FALLBACK, FIRST_CLICK, "unrelated"):
         server.write_text(changed)
         out = subprocess.run(["node", str(patch), str(server)], capture_output=True, text=True)
         assert out.returncode != 0 and "not found exactly once" in out.stderr

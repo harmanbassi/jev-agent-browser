@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Record a click the browser abandoned after sending it (a 409/422 from the input
+  itself) as a step with `effect`: `taken` when the page moved, otherwise
+  `uncertain`. Previously a click that navigated to a slow page vanished from
+  history and was repeated.
+- Browser image: when a click navigates to a slow page, the patched `/click`
+  route waits (bounded) for the navigation instead of running fallbacks against
+  the old page for about 12 s and returning 422. Rebuild the image to apply it.
+- Auto-escalated and `always` vision runs finish on the text `DONE` rules; only
+  `require_visual` runs need visual completion verification. That verification
+  asks whether the image shows the goal's end state and passes at 0.95, or at 0.8
+  with the decision's goal check at 0.9 or more.
+- Wait (bounded) after clicking a control with `aria-expanded` until its state
+  changes, so menus that open late (a flight search's ticket type) are observed.
+- Detect clicks that start a file download (listed by the browser's downloads
+  route), record the file in the step and `downloads`, and pause with
+  `download_started` instead of clicking it again.
 - Ask a goal check with every decision (same request). A confident yes finishes
   only where the operation head leaves room (it gives `DONE` at least 0.15 or
   its action is below the floor), never over `NEED_GUIDANCE`/`BLOCKED`. A

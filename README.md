@@ -129,8 +129,9 @@ Every interface (Python, CLI, MCP, Hermes) returns the same result fields:
 | `url`, `title`, `text` | The last page read, when it passed the URL policy |
 | `elements` | On `paused`: the observed controls Jev could act on |
 | `fallback` | On `paused` (Python/MCP): what the supervising agent should do next |
-| `steps` | Executed actions with `from_url` (the page they ran on), `url_after` (where they led, once that page passed the URL policy), their confidences and `page_changed` |
+| `steps` | Executed actions with `from_url` (the page they ran on), `url_after` (where they led, once that page passed the URL policy), their confidences and `page_changed`. `effect` marks a click the browser abandoned after sending it (`taken` if the page moved, else `uncertain`); `download` names a file it started |
 | `jev_calls`, `model_requests` | Decisions made; model HTTP requests including retries/helpers |
+| `downloads` | Files that clicks started downloading; a click that started one is not repeated (`download_started` pause) |
 | `recoveries` | Tabs the browser destroyed during a read that were reopened on the latest page (at most 2), also listed in `steps`. A tab lost during an action pauses as `tab_lost` instead, because the action may have taken effect |
 | `usage` | Reported `input_tokens`/`output_tokens` (and `cost` where the provider reports it) for the task, totalled and `by_model` |
 | `vision` | With vision allowed: image calls, captures, `uploaded_bytes`, escalations, verification |

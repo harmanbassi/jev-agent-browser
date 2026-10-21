@@ -433,3 +433,52 @@ def test_a_confident_action_is_taken_despite_a_confident_goal_check(monkeypatch)
     out = loop.run_task(page, "submit the form")
 
     assert page.acted == [("e2", None)] and out.get("done_by") is None
+
+
+class Uncertain(FakePage):
+    """The browser abandons the click after it may have reached the page."""
+
+    def act(self, action, page, text=None):
+        from jev_browser.camofox import ActionUncertain
+        self.acted.append((action["id"], text))
+        raise ActionUncertain("/tabs/t/click: page changed (HTTP 422)")
+
+
+@pytest.mark.parametrize("after, effect", [
+    (make_state(url="https://a.test/downloads/", marker="b"), "taken"),
+    (make_state(url="https://a.test/", marker="b", text="same page, new banner"), "uncertain"),
+])
+def test_an_abandoned_click_is_still_recorded(monkeypatch, after, effect):
+    page = Uncertain([make_state(url="https://a.test/", marker="a"), after])
+    seen = script(monkeypatch, [decision("e2", "CLICK"), decision("DONE")])
+
+    out = loop.run_task(page, "open the downloads page")
+
+    step = out["steps"][0]
+    assert out["status"] == "done" and step["effect"] == effect and step["url_after"] == after["url"]
+    assert seen[1][0]["effect"] == effect  # Jev knows it clicked
+
+
+class Downloading(FakePage):
+    def __init__(self, states):
+        super().__init__(states)
+        self.files = []
+
+    def act(self, action, page, text=None):
+        super().act(action, page, text)
+        self.files = ["python-3.15.1.exe"]
+
+    def new_downloads(self):
+        files, self.files = self.files, []
+        return files
+
+
+def test_a_click_that_starts_a_download_is_recorded_and_never_repeated(monkeypatch):
+    page = Downloading([make_state(url="https://a.test/downloads/")])
+    seen = script(monkeypatch, [decision("e2", "CLICK"), decision("e2", "CLICK")])
+
+    out = loop.run_task(page, "open the latest release page")
+
+    assert out["status"] == "paused" and out["reason"] == "download_started"
+    assert out["downloads"] == ["python-3.15.1.exe"] and page.acted == [("e2", None)]
+    assert out["steps"][0]["download"] == "python-3.15.1.exe" and seen[1][0]["download"] == "python-3.15.1.exe"

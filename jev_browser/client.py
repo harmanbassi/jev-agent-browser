@@ -28,6 +28,9 @@ FALLBACKS = {
     "tab_lost": "The browser closed the tab while the last step ran; it may already have taken effect (for "
                 "example a submitted form). Check the result before repeating it: browser_task reopens the "
                 "latest page in this session, or open the reported url in a new session.",
+    "download_started": "A click started a file download (listed in downloads) and Jev will not repeat it. "
+                        "If the goal was the file, it is done; otherwise give browser_task a goal that avoids "
+                        "that link.",
 }
 CONTINUE = "Continue with browser_task (no new information needed) within a fresh budget."
 BUDGETS = {"step_budget", "model_budget", "timeout", "vision_budget", "vision_capture_budget", "cancelled"}
