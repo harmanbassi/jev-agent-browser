@@ -64,9 +64,12 @@ SETTLE_JS = """(action => new Promise(resolve => {
   const field=window.__jevFast?.nodes.get(action.node);
   const autocomplete=action.kind==='fill' && !!field && (['combobox','searchbox'].includes(field.getAttribute('role'))
     || field.type==='search' || field.hasAttribute('aria-autocomplete'));
+  // A menu button can open its options well after the click (Google Flights' ticket
+  // type); reading before it changes state hides the options and invites a re-click.
+  const toggle=action.kind==='click' && !!field && typeof action.expanded==='string';
   let frames=0, stopped=false;
   const finish=()=>{stopped=true;resolve(true)};
-  setTimeout(finish,autocomplete ? AUTOCOMPLETE_WAIT_MS : 50);
+  setTimeout(finish,autocomplete || toggle ? AUTOCOMPLETE_WAIT_MS : 50);
   const ready=()=>{
     if (stopped) return;
     const ids=(field?.getAttribute('aria-controls')||field?.getAttribute('aria-owns')||'')
@@ -77,7 +80,7 @@ SETTLE_JS = """(action => new Promise(resolve => {
       const r=e.getBoundingClientRect();
       return r.width && r.height && r.bottom>0 && r.top<innerHeight &&
         e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true});
-    }))) finish();
+    })) && (!toggle || field.getAttribute('aria-expanded')!==action.expanded)) finish();
     else requestAnimationFrame(ready);
   };
   requestAnimationFrame(ready);

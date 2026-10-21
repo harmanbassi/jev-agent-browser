@@ -386,3 +386,7 @@ def test_a_supervisor_key_press_needs_a_fresh_page_and_settles_before_the_next_r
     assert cf.calls[0] == ("press", "ArrowDown") and ("settle",) in cf.calls
     with pytest.raises(StalePage):
         Page(FakeCamofox(fresh=False)).press("Enter", state)
+
+
+def test_settle_waits_for_a_toggled_control_to_change_state():
+    assert "aria-expanded" in camofox.SETTLE_JS and "action.expanded" in camofox.SETTLE_JS
