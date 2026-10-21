@@ -62,3 +62,60 @@ def test_dockerfile_applies_the_click_patch_and_the_build_context_includes_it():
     assert 'if [ "$CAMOFOX_CLICK_PATCH" = "1" ]; then node /tmp/camofox-click-timeout.mjs /app/server.js; fi' in dockerfile
     assert "CAMOFOX_CLICK_PATCH=0" in (repo / "docs/camofox-operations.md").read_text()
     assert "!examples/camofox-click-timeout.mjs" in (repo / ".dockerignore").read_text().splitlines()
+
+
+DOWNLOAD_LISTENER = """    let failure = null;
+    let bytes = null;
+
+    try {
+      await download.saveAs(filePath);
+    } catch (err) {
+      failure = String(err?.message || err || 'download_save_failed');
+    }
+
+    const mimeType = guessMimeTypeFromName(suggestedFilename) || guessMimeTypeFromName(url);
+    tabState.downloads.push({
+      id: downloadId,
+      tabId,
+      url,
+      suggestedFilename,
+      mimeType,
+      bytes,
+      createdAt: new Date().toISOString(),
+      filePath: failure ? null : filePath,
+      failure,
+    });
+"""
+DOWNLOAD_LIST = """    const item = {
+      id: entry.id,
+      failure: entry.failure,
+    };
+"""
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
+def test_image_lists_a_download_as_soon_as_it_starts_or_fails_the_build(tmp_path):
+    patch = PLUGIN.parents[1] / "examples/camofox-download-progress.mjs"
+    downloads = tmp_path / "downloads.js"
+    downloads.write_text(DOWNLOAD_LISTENER + DOWNLOAD_LIST)
+    out = subprocess.run(["node", str(patch), str(downloads)], capture_output=True, text=True)
+    assert out.returncode == 0, out.stdout + out.stderr
+    patched = downloads.read_text()
+    # Listed with state in_progress before saveAs waits for the whole file, then updated in place.
+    assert patched.index("state: 'in_progress'") < patched.index("await download.saveAs")
+    assert "state: failure ? 'failed' : 'complete'" in patched and "tabState.downloads.push({\n" not in patched
+    assert "state: entry.state || 'complete'," in patched
+    for changed in (patched, DOWNLOAD_LISTENER, DOWNLOAD_LIST, "unrelated"):
+        downloads.write_text(changed)
+        out = subprocess.run(["node", str(patch), str(downloads)], capture_output=True, text=True)
+        assert out.returncode != 0 and "not found exactly once" in out.stderr
+
+
+def test_dockerfile_applies_the_download_patch_behind_its_own_build_arg():
+    repo = PLUGIN.parents[1]
+    dockerfile = (repo / "examples/Dockerfile").read_text()
+    assert "ARG CAMOFOX_DOWNLOAD_PATCH=1" in dockerfile.split("FROM ", 1)[1]
+    assert ('if [ "$CAMOFOX_DOWNLOAD_PATCH" = "1" ]; then node /tmp/camofox-download-progress.mjs '
+            '/app/lib/downloads.js; fi') in dockerfile
+    assert "!examples/camofox-download-progress.mjs" in (repo / ".dockerignore").read_text().splitlines()
+    assert "CAMOFOX_DOWNLOAD_PATCH=0" in (repo / "docs/camofox-operations.md").read_text()

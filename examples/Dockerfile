@@ -20,6 +20,13 @@ ARG CAMOFOX_CLICK_PATCH=1
 COPY examples/camofox-click-timeout.mjs /tmp/camofox-click-timeout.mjs
 RUN if [ "$CAMOFOX_CLICK_PATCH" = "1" ]; then node /tmp/camofox-click-timeout.mjs /app/server.js; fi \
     && rm /tmp/camofox-click-timeout.mjs
+# Temporary carry: list a download as soon as it starts (state in_progress) instead
+# of only after the whole file arrived. CAMOFOX_DOWNLOAD_PATCH=0 skips it for other
+# bases; large downloads then stay invisible to the client until they finish.
+ARG CAMOFOX_DOWNLOAD_PATCH=1
+COPY examples/camofox-download-progress.mjs /tmp/camofox-download-progress.mjs
+RUN if [ "$CAMOFOX_DOWNLOAD_PATCH" = "1" ]; then node /tmp/camofox-download-progress.mjs /app/lib/downloads.js; fi \
+    && rm /tmp/camofox-download-progress.mjs
 COPY camofox_plugin/jev_vision/ /app/plugins/jev_vision/
 COPY jev_browser/snapshot.js /app/plugins/jev_vision/snapshot.js
 RUN node -e 'const fs=require("fs");const p="/app/camofox.config.json";const c=JSON.parse(fs.readFileSync(p));if(Array.isArray(c.plugins))c.plugins.push("jev_vision");else c.plugins={...c.plugins,jev_vision:{enabled:true}};fs.writeFileSync(p,JSON.stringify(c))'
