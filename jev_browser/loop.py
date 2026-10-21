@@ -209,6 +209,7 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
             step = {
                 "action": action["label"],
                 "kind": action["kind"],
+                "url": state["url"],  # lets Jev see it already visited a page
                 "text": text,
                 "confidence": round(decision["confidence"], 3),
                 "target_confidence": target_confidence and round(target_confidence, 3),

@@ -277,3 +277,12 @@ def test_duplicate_links_no_longer_split_the_target_below_the_floor(monkeypatch)
     out = loop.run_task(page, "open the comments", max_steps=1)
 
     assert page.acted == [("e1", None)] and out["reason"] == "step_budget"
+
+
+def test_each_step_records_the_page_it_was_taken_on(monkeypatch):
+    page = FakePage([make_state(url="https://a.test/", marker="a"), make_state(url="https://a.test/item", marker="b")])
+    seen = script(monkeypatch, [decision("e2", "CLICK"), decision("DONE")])
+
+    out = loop.run_task(page, "goal")
+
+    assert out["steps"][0]["url"] == "https://a.test/" and seen[1][0]["url"] == "https://a.test/"

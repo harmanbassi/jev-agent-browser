@@ -122,7 +122,7 @@ Every interface (Python, CLI, MCP, Hermes) returns the same result fields:
 | `status` | `done`, `paused` (with `reason`) or `error` |
 | `url`, `title`, `text` | The last page read, when it passed the URL policy |
 | `elements` | On `paused`: the observed controls Jev could act on |
-| `steps` | Executed actions with their confidences and `page_changed` |
+| `steps` | Executed actions with the `url` they ran on, their confidences and `page_changed` |
 | `jev_calls`, `model_requests` | Decisions made; model HTTP requests including retries/helpers |
 | `completion_probability` | The last decision's goal check: probability the goal is already met |
 | `done_by` | `goal_check` when that check (at least 0.9), not the operation choice, finished the task |

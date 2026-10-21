@@ -288,3 +288,13 @@ def test_the_guard_layout_still_carries_href_at_index_14():
             part += char
     parts.append(part.strip())
     assert parts[jev.GUARD_HREF] == "e.getAttribute('href')"
+
+
+def test_recent_actions_tell_jev_which_page_each_action_was_on(monkeypatch, key):
+    post = goal_reply("CLICK", 0.5)
+    monkeypatch.setattr(jev, "post_json", post)
+    history = [{"action": "42 comments", "kind": "click", "text": None, "page_changed": True,
+                "url": "https://news.example.test/", "confidence": 0.9}]
+    jev.choose(make_state(), "open the comments", history)
+    assert post.bodies[0]["state"]["recent_actions"] == [
+        {"action": "42 comments", "kind": "click", "text": None, "page_changed": True, "url": "https://news.example.test/"}]

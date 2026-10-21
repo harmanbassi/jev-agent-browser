@@ -205,7 +205,7 @@ def choose(state, goal, history, *, frame=None, vision_run=None, target_floor=0.
             "page": {k: state[k] for k in ("url", "title", "text")},
             "elements": elements,
             "recent_actions": [
-                {k: h.get(k) for k in ("action", "kind", "text", "page_changed")} for h in history[-10:]
+                {k: h.get(k) for k in ("action", "kind", "text", "page_changed", "url")} for h in history[-10:]
             ],
         },
         "questions": questions,
