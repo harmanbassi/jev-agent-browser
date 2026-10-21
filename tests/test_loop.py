@@ -337,15 +337,30 @@ def test_results_report_token_usage_next_to_call_counts(monkeypatch):
 
 
 class Recoverable(FakePage):
-    def __init__(self, states, gone=1, owned=True):
+    """The browser destroys the tab during a freshness read, an action, or the read after it."""
+
+    def __init__(self, states, gone=1, owned=True, during="fresh"):
         super().__init__(states)
-        self.gone, self.owned, self.reopened = gone, owned, []
+        self.gone, self.owned, self.during, self.reopened, self.observed = gone, owned, during, [], 0
+
+    def lose(self, phase):
+        from jev_browser.camofox import TabGone
+        if self.during == phase and self.gone:
+            self.gone -= 1
+            raise TabGone(f"Camofox /tabs/t/{phase} returned HTTP 410")
+
+    def fresh(self, page, action=None):
+        self.lose("fresh")
+        return True
+
+    def observe(self):
+        self.observed += 1
+        if self.observed > 1:  # the read after an action
+            self.lose("observe")
+        return super().observe()
 
     def act(self, action, page, text=None):
-        from jev_browser.camofox import TabGone
-        if self.gone:
-            self.gone -= 1
-            raise TabGone("Camofox /tabs/t/click returned HTTP 410")
+        self.lose("act")
         super().act(action, page, text)
 
     def recover(self, url, guard):
@@ -353,20 +368,36 @@ class Recoverable(FakePage):
         return self.owned
 
 
-def test_a_destroyed_tab_is_reopened_once_and_the_task_continues(monkeypatch):
-    page = Recoverable([make_state(url="https://a.test/form", marker="a"), make_state(marker="b")])
-    script(monkeypatch, [decision("e2", "CLICK"), decision("e2", "CLICK"), decision("DONE")])
+def test_a_tab_destroyed_during_a_read_reopens_the_latest_page_and_continues(monkeypatch):
+    page = Recoverable([make_state(url="https://a.test/form", marker="a"),
+                        make_state(url="https://a.test/sent", marker="b")])
+    script(monkeypatch, [decision("e2", "CLICK"), decision("DONE")])
 
     out = loop.run_task(page, "goal")
 
-    assert out["status"] == "done" and out["recoveries"] == 1 and page.reopened == [("https://a.test/form", None)]
-    assert out["steps"][0]["kind"] == "recover" and out["steps"][0]["from_url"] == "https://a.test/form"
-    assert page.acted == [("e2", None)]
+    assert out["status"] == "done" and out["recoveries"] == 1
+    assert page.reopened == [("https://a.test/sent", None)]  # never the form page the click left
+    assert [s["kind"] for s in out["steps"]] == ["click", "recover"] and page.acted == [("e2", None)]
+
+
+@pytest.mark.parametrize("during", ["act", "observe"])
+def test_a_tab_destroyed_during_or_right_after_an_action_is_never_retried(monkeypatch, during):
+    # The click may have submitted the form before the tab died: reopening and
+    # deciding again could submit it twice.
+    page = Recoverable([make_state(url="https://a.test/form", marker="a")], during=during)
+    script(monkeypatch, [decision("e2", "CLICK"), decision("e2", "CLICK")])
+
+    out = loop.run_task(page, "submit the form")
+
+    assert out["status"] == "paused" and out["reason"] == "tab_lost" and out["url"] == "https://a.test/form"
+    assert page.reopened == [] and "recoveries" not in out and "text" not in out
+    assert out["steps"][-1]["action"] == "Go" and out["steps"][-1]["tab_lost"] is True
+    assert len(out["steps"]) == 1
 
 
 @pytest.mark.parametrize("gone, owned", [(9, True), (1, False)])
 def test_tab_recovery_is_bounded_and_needs_an_owned_tab(monkeypatch, gone, owned):
-    page = Recoverable([make_state()], gone=gone, owned=owned)
+    page = Recoverable([make_state(marker=str(i)) for i in range(9)], gone=gone, owned=owned)
     script(monkeypatch, [decision("e2", "CLICK")] * 9)
 
     out = loop.run_task(page, "goal")

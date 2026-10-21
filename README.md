@@ -131,7 +131,7 @@ Every interface (Python, CLI, MCP, Hermes) returns the same result fields:
 | `fallback` | On `paused` (Python/MCP): what the supervising agent should do next |
 | `steps` | Executed actions with `from_url` (the page they ran on), `url_after` (where they led, once that page passed the URL policy), their confidences and `page_changed` |
 | `jev_calls`, `model_requests` | Decisions made; model HTTP requests including retries/helpers |
-| `recoveries` | Tabs the browser destroyed that were reopened on the last page (at most 2), also listed in `steps` |
+| `recoveries` | Tabs the browser destroyed during a read that were reopened on the latest page (at most 2), also listed in `steps`. A tab lost during an action pauses as `tab_lost` instead, because the action may have taken effect |
 | `usage` | Reported `input_tokens`/`output_tokens` (and `cost` where the provider reports it) for the task, totalled and `by_model` |
 | `vision` | With vision allowed: image calls, captures, `uploaded_bytes`, escalations, verification |
 | `completion_probability` | The last decision's goal check: probability the goal is already met |

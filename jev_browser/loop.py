@@ -67,7 +67,7 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
     steps, decisions = [], []
     recoveries = 0
     started = time.perf_counter()
-    state = cleared = None  # cleared: the last read page whose URL passed the guard
+    state = cleared = latest = None  # cleared: the last read page whose URL passed the guard
     frame = None
     using_vision = vision_mode == "always" or visual.required
     # Strict floors only where visual verification is the point. An auto-escalated
@@ -90,6 +90,17 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
             visual.escalations += 1
             return True
         return False
+
+    def tab_lost(action, text):
+        # The action may have taken effect (a submitted form whose response was slow)
+        # before the browser destroyed the tab. Never reopen and decide it again.
+        nonlocal state
+        attempted, state = state["url"], None
+        step = {"action": action["label"], "kind": action["kind"], "from_url": attempted,
+                "text": text, "page_changed": None, "tab_lost": True}
+        steps.append(step)
+        history.append(step)
+        return result("paused", "tab_lost", url=attempted)
 
     def landed(url):
         # Where the last action led, recorded only once that page passed the guard.
@@ -133,7 +144,7 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
             current.get().check()
             try:
                 if state is None or not page.fresh(state):
-                    state = page.observe()
+                    state = latest = page.observe()
                 if state is not cleared:
                     if guard and (blocked := guard(state["url"])):
                         return result("error", blocked)  # uncleared: its text goes nowhere
@@ -155,7 +166,7 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                     return result("paused", "step_budget")
                 if using_vision:
                     frame = capture()
-                    state = cleared = frame.state
+                    state = cleared = latest = frame.state
                     landed(state["url"])
                     decision = choose(state, goal, history, frame=frame, vision_run=visual,
                                       target_floor=max(min_target_confidence, strict))
@@ -219,15 +230,18 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                         raise StalePage("Visual target changed.")
                     state = cleared = fresh.state
                     frame = fresh
-                page.act(action, state, text=text)
+                try:
+                    page.act(action, state, text=text)
+                except TabGone:
+                    return tab_lost(action, text)
             except TabGone as gone:
-                # A hung browser operation can make the server destroy the tab (HTTP 410).
-                # Cookies survive in the identity: reopen the last page this task cleared.
-                if (recoveries >= MAX_RECOVERIES or cleared is None or not hasattr(page, "recover")
-                        or not page.recover(cleared["url"], guard)):
+                # A hung read can make the server destroy the tab (HTTP 410). No action was in
+                # flight, and cookies survive in the identity: reopen the last page this task cleared.
+                if (recoveries >= MAX_RECOVERIES or latest is None or not hasattr(page, "recover")
+                        or not page.recover(latest["url"], guard)):  # reopening re-checks the guard
                     return result("error", str(gone))
                 recoveries += 1
-                step = {"action": "Reopened the page in a new tab", "kind": "recover", "from_url": cleared["url"],
+                step = {"action": "Reopened the page in a new tab", "kind": "recover", "from_url": latest["url"],
                         "text": None, "page_changed": True}
                 steps.append(step)
                 history.append(step)
@@ -237,7 +251,7 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                 stale += 1
                 if stale > MAX_STALE:
                     return result("error", "Page kept changing under every decision.")
-                state = page.observe()
+                state = latest = page.observe()
                 continue
             stale = 0
             step = {
@@ -251,7 +265,12 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
             steps.append(step)
             history.append(step)
             previous = state["fingerprint"]
-            state = page.observe()
+            try:
+                state = latest = page.observe()
+            except TabGone:
+                steps.pop()
+                history.pop()
+                return tab_lost(action, text)
             step["page_changed"] = state["fingerprint"] != previous
     except BudgetExceeded as e:
         return result("paused", str(e))

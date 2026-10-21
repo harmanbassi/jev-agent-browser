@@ -108,7 +108,8 @@ NEXT = {
         "browser_vision to look; browser_click/browser_type, browser_press for keys such as ArrowDown "
         "then Enter in an autocomplete) and then call browser_task again without url to continue. "
         "On sensitive_action, enter the value yourself only if the user supplied it and approved the "
-        "step; otherwise ask the user."
+        "step; otherwise ask the user. On tab_lost, the browser closed the tab mid-step and the step "
+        "may already have taken effect: check before repeating it."
     ),
     "error": "Retry once; if it fails again, fall back to browser_navigate/browser_snapshot/browser_click.",
 }

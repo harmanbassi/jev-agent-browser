@@ -25,6 +25,9 @@ FALLBACKS = {
                         "browser_act, then continue with browser_task.",
     "missing_value": "The goal does not supply this field's value. Ask the user, or type the value they gave "
                      "with browser_act, then continue with browser_task.",
+    "tab_lost": "The browser closed the tab while the last step ran; it may already have taken effect (for "
+                "example a submitted form). Check the result before repeating it: browser_task reopens the "
+                "latest page in this session, or open the reported url in a new session.",
 }
 CONTINUE = "Continue with browser_task (no new information needed) within a fresh budget."
 BUDGETS = {"step_budget", "model_budget", "timeout", "vision_budget", "vision_capture_budget", "cancelled"}
