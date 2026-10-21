@@ -221,3 +221,109 @@ def test_visual_requirement_persists_and_can_be_explicitly_cleared(browser, monk
     monkeypatch.setenv("JEV_VISION_ENABLED", "0")
     assert browser.start("https://a.test", "red", require_visual=True)["reason"] == "vision_disabled"
     assert browser.run(sid, "red", require_visual=True)["reason"] == "vision_disabled"
+
+
+FORM = [
+    {"id": "e1", "kind": "fill", "node": 1, "label": "Phone", "role": "textbox", "value": "", "sensitive": True},
+    {"id": "e2", "kind": "click", "node": 2, "label": "Submit order", "role": "button", "value": ""},
+    {"id": "e3", "kind": "select", "node": 3, "label": "Size → Small", "value": "s", "current_value": "Large"},
+    {"id": "scroll_down", "kind": "scroll", "label": "Scroll down", "delta": 560},
+]
+
+
+def supervised(browser, *states):
+    from helpers import FakePage
+    sid = browser.start("https://a.test", "g")["session_id"]
+    page = FakePage(list(states))
+    browser._sessions[sid].page = page
+    return sid, page
+
+
+def test_snapshot_shows_the_page_without_a_model_call(browser, monkeypatch):
+    from helpers import make_state
+    monkeypatch.setattr(client, "run_task", lambda *a, **k: pytest.fail("no model call"))
+    browser._sessions.clear()
+    sid = browser.open("https://a.test")["session_id"]
+    from helpers import FakePage
+    browser._sessions[sid].page = FakePage([make_state(text="Order form", actions=FORM)])
+    out = browser.snapshot(sid)
+    assert out["status"] == "ready" and out["text"] == "Order form" and out["url"] == "https://example.test/"
+    assert [(e["index"], e["label"]) for e in out["elements"]] == [("1", "Phone"), ("2", "Submit order"), ("3", "Size")]
+
+
+def test_supervisor_types_a_sensitive_value_that_never_reaches_jev(browser, monkeypatch):
+    from helpers import make_state
+    sid, page = supervised(browser, make_state(actions=FORM, marker="a"), make_state(actions=FORM, marker="b"))
+    assert browser.act(sid, "1", "type", "+1 555 0100")["status"] == "error"  # observe first
+    browser.snapshot(sid)
+    out = browser.act(sid, "1", "type", "+1 555 0100")
+    assert out["status"] == "ready" and out["changed"] and out["elements"][0]["label"] == "Phone"
+    assert page.acted == [("e1", "+1 555 0100")]
+    seen = []
+    monkeypatch.setattr(client, "run_task", lambda page, goal, **kw: seen.append(kw["history"]) or {"status": "done", "steps": []})
+    browser.run(sid, "submit the form")
+    assert "555" not in str(seen) and seen[0][-1]["action"] == "Phone" and seen[0][-1]["text"] == client.SUPERVISOR_TEXT
+
+
+@pytest.mark.parametrize("args, acted", [
+    (("2", "click"), ("e2", None)),
+    (("3", "select", "Small"), ("e3", None)),
+    (("3", "select", "s"), ("e3", None)),
+    ((None, "press", "ArrowDown"), ("press", "ArrowDown")),
+    ((None, "scroll", "down"), ("scroll_down", None)),
+])
+def test_supervisor_actions_use_the_observed_targets(browser, args, acted):
+    from helpers import make_state
+    sid, page = supervised(browser, make_state(actions=FORM))
+    browser.snapshot(sid)
+    assert browser.act(sid, *args)["status"] == "ready" and page.acted == [acted]
+
+
+@pytest.mark.parametrize("args", [
+    ("9", "click"), ("1", "click", None), ("2", "type", "x"), ("1", "type", ""), ("1", "type", "x" * 2001),
+    ("3", "select", "Huge"), (None, "press", "Control+w"), (None, "scroll", "sideways"),
+    ("2", "evaluate", "document.cookie"), ("#submit", "click"),
+])
+def test_supervisor_actions_are_limited_to_observed_ids_and_known_keys(browser, args):
+    from helpers import make_state
+    sid, page = supervised(browser, make_state(actions=[a for a in FORM if a["id"] != "scroll_down"]))
+    browser.snapshot(sid)
+    if args == ("1", "click", None):
+        args = ("1", "click")  # a fill-only element offers no click
+    out = browser.act(sid, *args)
+    assert out["status"] == "error" and page.acted == []
+
+
+def test_supervisor_actions_respect_freshness_policy_and_busy_sessions(browser):
+    from helpers import make_state
+    from jev_browser.camofox import StalePage
+    private = make_state(url="http://10.0.0.1/admin", text="secret", actions=FORM, marker="b")
+    sid, page = supervised(browser, make_state(actions=FORM, marker="a"), private)
+    browser.snapshot(sid)
+
+    def stale(*a, **k):
+        raise StalePage("changed")
+
+    page.act, original = stale, page.act
+    out = browser.act(sid, "2", "click")
+    assert out["status"] == "error" and "browser_snapshot" in out["reason"]
+    assert "browser_snapshot" in browser.act(sid, "2", "click")["reason"]  # stale ids are dropped
+    page.act = original
+    page.states.insert(0, make_state(actions=FORM, marker="a"))
+    browser.snapshot(sid)
+    out = browser.act(sid, "2", "click")  # navigates to a page the policy blocks
+    assert out["status"] == "error" and "private" in out["reason"] and "secret" not in str(out)
+    assert page.acted == [("e2", None)] and browser.snapshot(sid)["status"] == "error"
+    browser._sessions[sid].lock.acquire()
+    try:
+        assert "busy" in browser.snapshot(sid)["reason"] and "busy" in browser.act(sid, "2", "click")["reason"]
+    finally:
+        browser._sessions[sid].lock.release()
+
+
+@pytest.mark.parametrize("reason, hint", [("sensitive_action", "browser_act"), ("missing_value", "browser_act"),
+                                          ("low_confidence", "browser_snapshot"), ("step_budget", "browser_task")])
+def test_paused_results_name_the_fallback(browser, monkeypatch, reason, hint):
+    monkeypatch.setattr(client, "run_task", lambda *a, **k: {"status": "paused", "reason": reason, "steps": []})
+    out = browser.start("https://a.test", "g")
+    assert hint in out["fallback"]

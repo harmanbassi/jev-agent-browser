@@ -20,6 +20,14 @@
   page; `max_steps` still bounds an endless feed.
 - Report provider token usage (and cost where reported) per task in results,
   totalled and per model, for Python, CLI, MCP and Hermes.
+- Supervisor fallback on the same session: MCP `browser_snapshot` / `browser_act`
+  and Python `Browser.snapshot` / `Browser.act` act on observed element ids
+  through the executor's freshness and target checks (click, type, select,
+  allowlisted keys, scroll). Paused results name the applicable `fallback`;
+  the Hermes pause guidance points to its own manual tools and continuing.
+- Observations include the text of non-sensitive text areas, so code views
+  (for example a hosted file's contents) reach Jev. This changes `snapshot.js`:
+  rebuild the browser image so the masked-observation plugin matches.
 - Update the browser image's MCP TypeScript SDK pin to 1.32.1 so fresh builds
   pass the current dependency security audit.
 

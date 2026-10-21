@@ -44,6 +44,9 @@ class FakePage:
     def act(self, action, page, text=None):
         self.acted.append((action["id"], text))
 
+    def press(self, key, page):
+        self.acted.append(("press", key))
+
 
 def decision(choice, operation=None, confidence=0.9, target_confidence=None):
     return {"choice": choice, "operation": operation or choice, "confidence": confidence,

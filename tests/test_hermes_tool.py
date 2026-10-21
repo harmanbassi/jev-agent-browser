@@ -235,3 +235,11 @@ def test_native_profile_busy_prevents_navigation(bc, monkeypatch):
         release.set()
         thread.join(3)
     assert not hermes_tool._tab_locks
+
+
+def test_paused_guidance_names_the_manual_tools_then_continuing(bc, runs):
+    calls, results = runs
+    results.append({**done(), "status": "paused", "reason": "sensitive_action"})
+    out = json.loads(hermes_tool.handle({"goal": "g", "url": "https://a.test"}, task_id="t"))
+    assert all(tool in out["next"] for tool in ("browser_snapshot", "browser_type", "browser_press"))
+    assert "browser_task again" in out["next"] and "sensitive_action" in out["next"]

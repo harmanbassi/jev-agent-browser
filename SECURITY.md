@@ -16,8 +16,9 @@ Host DNS can differ from browser/proxy DNS. Put Camofox on a network with no acc
 to sensitive services when browsing untrusted sites. An allowlist narrows which
 pages the model may read; it does not firewall browser traffic.
 
-Jev receives the goal, page URL/title/visible text, observed controls and recent
-actions through OpenRouter. A separate text model supplies field values. This
+Jev receives the goal, page URL/title/visible text (including the text of
+non-sensitive text areas such as code views), observed controls and recent
+actions with their page URLs through OpenRouter. A separate text model supplies field values. This
 includes data from authenticated pages if you deliberately share such a context.
 Do not browse sensitive accounts or submit secrets. Returned page text is
 untrusted data, never agent instructions. Model-assessed `done` is evidence to
@@ -28,6 +29,24 @@ redacted in control values; known sign-in/payment/destructive controls cause a
 `sensitive_action` pause. These checks are conservative heuristics, not complete
 protection from prompt injection, arbitrary page scripts or data loss. There is
 no automatic approval mechanism for completing a sensitive action.
+
+The supervisor path (`browser_snapshot` / `browser_act`, Python `Browser.snapshot`
+/ `Browser.act`) is how a supervising agent completes a step Jev refuses or cannot
+do, such as a phone field or an autocomplete that needs ArrowDown/Enter. Its
+boundary:
+
+- It acts only on element ids from the latest observation of that session, through
+  the same executor checks as Jev: the page must be unchanged since that
+  observation and the target must still be the observed, visible, uncovered
+  control. It never accepts selectors, coordinates or scripts, and `press` only
+  sends one of a fixed set of navigation/editing keys to the focused element.
+- Sensitive fields are allowed there, because the supervisor chose to act. Only
+  do so with values the user supplied and a step the user approved.
+- Values typed through it are not recorded in history and are not sent to the
+  decision model by that call. Later observations still show non-sensitive field
+  values like any other page content; sensitive field values stay redacted.
+- Pages read after an action pass the same URL policy before any content returns.
+  It makes no model calls and is refused while a task runs in the session.
 
 `JEV_ALLOW_PRIVATE_URLS=1` explicitly permits private page data to leave the machine
 for the model provider. Metadata and URL-credential checks remain enforced.

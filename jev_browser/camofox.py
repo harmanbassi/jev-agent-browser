@@ -335,6 +335,13 @@ class Page:
             return current == [page["page_key"], page["guards"].get(str(node))]
         return self.cf.evaluate(MARKER) == page["marker"]
 
+    def press(self, key, page):
+        """A key on whatever holds focus, if the page is still the one observed."""
+        if not self.fresh(page):
+            raise StalePage("Page changed since this decision. Observe again.")
+        self.cf.press(key)
+        self.after_input = None
+
     def act(self, action, page, text=None):
         if not self.fresh(page, action):
             raise StalePage("Page changed since this decision. Observe again.")
