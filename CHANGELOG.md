@@ -7,9 +7,10 @@
   `uncertain`. Previously a click that navigated to a slow page vanished from
   history and was repeated. An identical action after an `uncertain` one with
   no page change pauses as `action_uncertain` instead of being sent twice.
-- Browser image: when a click navigates to a slow page, the patched `/click`
-  route waits (bounded) for the navigation instead of running fallbacks against
-  the old page for about 12 s and returning 422. Rebuild the image to apply it.
+- Browser image: when a click (first or forced) navigates to a slow page, the
+  patched `/click` route waits (bounded) for the navigation instead of running
+  fallbacks against the old page for about 12 s and returning 422. Rebuild the
+  image to apply it; `CAMOFOX_CLICK_PATCH=0` drops this fix too.
 - Auto-escalated and `always` vision runs finish on the text `DONE` rules; only
   `require_visual` runs need visual completion verification. That verification
   asks whether the image shows the goal's end state and passes at 0.95, or at 0.8

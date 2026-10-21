@@ -30,11 +30,7 @@ CLICK_FALLBACK = """      const dispatchDomClick = async (locator) => {
         log('info', 'DOM click dispatched after Playwright click failure');
       };
 """
-FIRST_CLICK = """        try {
-          // First try normal click (respects visibility, enabled, not-obscured)
-          await click({ timeout: 3000 });
-        } catch (err) {
-          // Fallback 1: If intercepted by overlay, retry with force
+CLICK_WRAPPER = """        const click = async (options) => clickWithDownloadGuard(tabState, () => locator.click(options));
 """
 
 
@@ -42,15 +38,18 @@ FIRST_CLICK = """        try {
 def test_image_bounds_the_dom_click_fallback_or_fails_the_build(tmp_path):
     patch = PLUGIN.parents[1] / "examples/camofox-click-timeout.mjs"
     server = tmp_path / "server.js"
-    server.write_text("const before = 1;\n" + CLICK_FALLBACK + FIRST_CLICK)
+    server.write_text("const before = 1;\n" + CLICK_FALLBACK + CLICK_WRAPPER)
     out = subprocess.run(["node", str(patch), str(server)], capture_output=True, text=True)
     assert out.returncode == 0, out.stdout + out.stderr
     patched = server.read_text()
     assert "}, undefined, { timeout: Math.max(500, Math.min(3000, remainingBudget())) });" in patched
-    # A click Playwright delivered whose navigation is still loading is a success, not a reason
-    # to force-click a page that has already gone.
-    assert "if (err.message.includes('click action done'))" in patched.split(FIRST_CLICK.splitlines()[3])[1]
-    for changed in (patched, CLICK_FALLBACK * 2 + FIRST_CLICK, CLICK_FALLBACK, FIRST_CLICK, "unrelated"):
+    # Every click attempt (first, forced, search-results) goes through this wrapper: one that
+    # Playwright delivered while its navigation is still loading is a success, never a reason
+    # to activate the departed page again through the fallbacks.
+    wrapper = patched[patched.index("const click = async (options)"):]
+    assert "includes('click action done')" in wrapper and "waitForURL" in wrapper
+    assert patched.count("click action done") == 1
+    for changed in (patched, CLICK_FALLBACK * 2 + CLICK_WRAPPER, CLICK_FALLBACK, CLICK_WRAPPER, "unrelated"):
         server.write_text(changed)
         out = subprocess.run(["node", str(patch), str(server)], capture_output=True, text=True)
         assert out.returncode != 0 and "not found exactly once" in out.stderr

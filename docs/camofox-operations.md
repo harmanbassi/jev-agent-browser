@@ -42,8 +42,10 @@ upstream bounds that call. The same step fixes a second fallback problem: when a
 click navigates to a slow page, Playwright reports the click as done and then
 times out waiting for the navigation, and the route ran force, DOM and mouse
 fallbacks against a page that had already gone, returning 422 after about 12
-seconds for a click that worked. The patched route instead waits, bounded inside
-its budget, for that navigation to commit and reports success. To build an older
+seconds for a click that worked. The patched route's click wrapper, which every
+attempt goes through (the first click, forced retries and the search-results
+path), instead waits, bounded inside its budget, for that navigation to commit
+and reports success. To build an older
 `CAMOFOX_BASE_IMAGE` whose code
 differs, pass `--build-arg CAMOFOX_CLICK_PATCH=0`; that image keeps the 30-second
 click hang, its HTTP 410s and the slow-navigation 422s. The client records a
