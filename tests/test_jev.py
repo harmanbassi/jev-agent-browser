@@ -262,6 +262,21 @@ def test_equivalent_links_pool_their_probability_and_act_on_the_first(monkeypatc
     assert d["target_confidence"] == pytest.approx(jev.choice_confidence([0.88, 0.12]))
 
 
+@pytest.mark.parametrize("href", ["#", "#cart", "javascript:void(0)", " JavaScript:add(2)", ""])
+def test_script_handled_links_are_never_pooled(monkeypatch, key, href):
+    # "Add to cart" on every row, all href="#": pooling would click the wrong row.
+    state = duplicates(("Add to cart", href, "link"), ("Add to cart", href, "link"), ("Add to cart", href, "link"))
+    monkeypatch.setattr(jev, "post_json", split_reply({"1": 0.02, "2": 0.95, "3": 0.03}, "2"))
+    d = jev.choose(state, "add the second item to the cart", [])
+    assert d["choice"] == "e2" and d["target_confidence"] == pytest.approx((0.95 - 1 / 3) / (2 / 3))
+
+
+def test_a_pooled_class_acts_on_the_member_jev_preferred(monkeypatch, key):
+    state = duplicates(("Comments", "item?id=1", "link"), ("Comments", "item?id=1", "link"), ("Hide", "hide", "link"))
+    monkeypatch.setattr(jev, "post_json", split_reply({"1": 0.1, "2": 0.85, "3": 0.05}, "2"))
+    assert jev.choose(state, "open the comments", [])["choice"] == "e2"
+
+
 @pytest.mark.parametrize("controls", [
     [("Delete", None, "button"), ("Delete", None, "button")],  # no shared destination
     [("Downloads", "/downloads/", "link"), ("Downloads", "/downloads/mac/", "link")],

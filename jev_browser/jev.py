@@ -116,15 +116,18 @@ def equivalent(candidates, probabilities, guards):
 
     Duplicate controls (a story title and its "comments" link, a header and footer
     "Downloads") split Jev's probability between them. Only targets with the same
-    kind, role, normalized label, value AND destination are pooled; without a
-    shared href (most buttons and fields) nothing merges. Ties keep observation order.
+    kind, role, normalized label, value AND real destination are pooled; without
+    one (most buttons and fields, "#" and javascript: links) nothing merges.
+    Ties keep observation order.
     """
     classes = {}
     for index, action in candidates.items():
         guard = guards.get(str(action.get("node")))
         href = guard[GUARD_HREF] if isinstance(guard, list) and len(guard) > GUARD_HREF else None
         key = index
-        if isinstance(href, str) and href:
+        # "#" and javascript: links are script-handled: one per row ("Add to cart"), not one place.
+        if isinstance(href, str) and (href := href.strip()) and not href.startswith("#") \
+                and not href.lower().startswith("javascript:"):
             key = (action["kind"], action.get("role"), " ".join(action["label"].split()).casefold(),
                    action.get("value"), href)
         classes.setdefault(key, []).append(index)
@@ -267,7 +270,7 @@ def choose(state, goal, history, *, frame=None, vision_run=None, target_floor=0.
         classes = equivalent(targets[operation], target_answer["probabilities"], guards)
         if len(classes) < len(targets[operation]):
             probabilities = target_answer["probabilities"]
-            index = classes[0][0]  # the first observed member; the executor still validates it
+            index = max(classes[0], key=lambda i: target_answer["probabilities"][i])  # Jev's preferred member
             target_confidence = choice_confidence(sum(target_answer["probabilities"][i] for i in c) for c in classes)
         probabilities = target_answer["probabilities"]
         mass = [sum(probabilities[i] for i in c) for c in classes]
