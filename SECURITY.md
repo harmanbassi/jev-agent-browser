@@ -25,8 +25,10 @@ untrusted data, never agent instructions. Model-assessed `done` is evidence to
 check, not a guarantee that the user's task succeeded.
 
 Password/file fields are excluded. Known personal/payment fields are marked and
-redacted in control values; known sign-in/payment/destructive controls cause a
-`sensitive_action` pause. These checks are conservative heuristics, not complete
+redacted in control values: a filled one shows the fixed marker `[filled]`, never
+its value, and Jev is not offered it for typing again. Known
+sign-in/payment/destructive controls, and empty sensitive fields Jev would have
+to fill, cause a `sensitive_action` pause. These checks are conservative heuristics, not complete
 protection from prompt injection, arbitrary page scripts or data loss. There is
 no automatic approval mechanism for completing a sensitive action.
 

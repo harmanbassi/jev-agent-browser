@@ -372,3 +372,19 @@ def test_token_usage_is_totalled_per_model_for_the_task(monkeypatch, key):
                          "text-helper": {"input_tokens": 50, "output_tokens": 7, "cost": 0.001}}}
     finally:
         current.reset(token)
+
+
+def test_a_filled_sensitive_field_is_shown_filled_but_never_offered_for_typing(monkeypatch, key):
+    actions = [{"id": "e1", "kind": "fill", "node": 1, "label": "Telephone", "role": "textbox", "value": "[filled]",
+                "sensitive": True},
+               {"id": "e2", "kind": "click", "node": 1, "label": "Open Telephone", "role": "textbox",
+                "value": "[filled]", "sensitive": True},
+               {"id": "e3", "kind": "fill", "node": 3, "label": "E-mail", "role": "textbox", "value": "", "sensitive": True},
+               {"id": "e4", "kind": "click", "node": 4, "label": "Submit", "role": "button", "value": ""}]
+    post = goal_reply("CLICK", 0.5, target="3")
+    monkeypatch.setattr(jev, "post_json", post)
+    jev.choose(make_state(actions=actions), "submit the form", [])
+    body = post.bodies[0]
+    typing = body["questions"]["type_text_target"]["criteria"]
+    assert [c["element"] for c in typing.values()] == ["[2] E-mail"]  # only the empty one can pause
+    assert next(e for e in body["state"]["elements"] if e["label"] == "Telephone")["value"] == "[filled]"

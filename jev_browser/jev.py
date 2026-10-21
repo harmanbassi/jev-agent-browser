@@ -36,7 +36,8 @@ DONE_SUPPORT = 0.15
 # only pick one of the TOP_K most probable observed classes.
 TIE = 0.5
 TOP_K = 3
-GUARD_HREF = 14  # position of the href attribute in snapshot.js's cache.guard tuple
+GUARD_HREF = 14
+FILLED = "[filled]"  # snapshot.js's stand-in for a sensitive field's value  # position of the href attribute in snapshot.js's cache.guard tuple
 _HTTP = requests.Session()
 _HTTP.max_redirects = 0  # Never forward a provider key via a redirect.
 
@@ -196,6 +197,14 @@ def choose(state, goal, history, *, frame=None, vision_run=None, target_floor=0.
     if frame is not None:
         state = frame.safe
     elements, targets, controls = action_space(state["actions"])
+    # A sensitive field someone already filled shows "[filled]" (never its value). Jev never
+    # types personal data, so it is not offered for typing and cannot pause the task again.
+    filled = {i for i, a in targets.get("TYPE_TEXT", {}).items() if a.get("sensitive") and a.get("value") == FILLED}
+    for index in filled:
+        del targets["TYPE_TEXT"][index]
+        elements[int(index) - 1]["operations"].remove("TYPE_TEXT")
+    if not targets.get("TYPE_TEXT", True):
+        del targets["TYPE_TEXT"]
     labels = {
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
         "TYPE_TEXT": "Enter or replace text in an editable field. A small LLM will supply the value from the goal.",
