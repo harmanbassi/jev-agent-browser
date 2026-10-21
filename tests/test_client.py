@@ -324,7 +324,8 @@ def test_supervisor_actions_respect_freshness_policy_and_busy_sessions(browser):
 @pytest.mark.parametrize("reason, hint", [("sensitive_action", "browser_act"), ("missing_value", "browser_act"),
                                           ("low_confidence", "browser_snapshot"), ("step_budget", "browser_task"),
                                           ("tab_lost", "may already have taken effect"),
-                                          ("download_started", "downloads")])
+                                          ("download_started", "downloads"),
+                                          ("action_uncertain", "may already have taken effect")])
 def test_paused_results_name_the_fallback(browser, monkeypatch, reason, hint):
     monkeypatch.setattr(client, "run_task", lambda *a, **k: {"status": "paused", "reason": reason, "steps": []})
     out = browser.start("https://a.test", "g")

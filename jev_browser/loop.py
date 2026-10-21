@@ -232,6 +232,10 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                 if any(h.get("download") and (h.get("action"), h.get("kind"), h.get("from_url")) == same
                        for h in history):
                     return result("paused", "download_started")  # never fetch the same file again
+                if (last.get("effect") == "uncertain" and last.get("page_changed") is False
+                        and (last.get("action"), last.get("kind"), last.get("from_url")) == same):
+                    # The browser may have delivered it (a slow submission): never send it twice.
+                    return result("paused", "action_uncertain")
                 text = None
                 if action["kind"] == "fill":
                     text = field_text(field_context(goal, action, frame.safe if using_vision else state, history))

@@ -5,7 +5,8 @@
 - Record a click the browser abandoned after sending it (a 409/422 from the input
   itself) as a step with `effect`: `taken` when the page moved, otherwise
   `uncertain`. Previously a click that navigated to a slow page vanished from
-  history and was repeated.
+  history and was repeated. An identical action after an `uncertain` one with
+  no page change pauses as `action_uncertain` instead of being sent twice.
 - Browser image: when a click navigates to a slow page, the patched `/click`
   route waits (bounded) for the navigation instead of running fallbacks against
   the old page for about 12 s and returning 422. Rebuild the image to apply it.

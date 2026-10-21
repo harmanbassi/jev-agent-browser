@@ -495,3 +495,24 @@ def test_a_download_that_lands_after_its_click_still_stops_a_repeat(monkeypatch)
 
     assert out["reason"] == "download_started" and page.acted == [("e2", None)]
     assert out["steps"][0]["download"] == "python-3.15.1.tar.xz"
+
+
+def test_a_delivered_but_slow_submit_is_never_clicked_again(monkeypatch):
+    # Without the image's slow-navigation fix the browser abandons the click after
+    # ~12 s while the POST is still loading: same page, effect uncertain.
+    page = Uncertain([make_state(url="https://a.test/form", marker="a")])
+    script(monkeypatch, [decision("e2", "CLICK"), decision("e2", "CLICK")])
+
+    out = loop.run_task(page, "submit the order")
+
+    assert out["status"] == "paused" and out["reason"] == "action_uncertain"
+    assert page.acted == [("e2", None)] and out["steps"][0]["effect"] == "uncertain"
+
+
+def test_a_different_action_after_an_uncertain_one_proceeds(monkeypatch):
+    page = Uncertain([make_state(url="https://a.test/form", marker="a")])
+    script(monkeypatch, [decision("e2", "CLICK"), decision("e1", "TYPE_TEXT"), decision("DONE")], texts=["x"])
+
+    out = loop.run_task(page, "fill and submit")
+
+    assert page.acted == [("e2", None), ("e1", "x")]
