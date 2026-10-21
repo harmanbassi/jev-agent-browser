@@ -10,9 +10,12 @@ RUN npm pkg set overrides.adm-zip=0.6.1 overrides.brace-expansion=5.0.12 \
     && npm install --omit=dev --ignore-scripts --save-exact playwright-core@1.59.1 proxy-addr@2.0.8 @modelcontextprotocol/sdk@1.32.1 \
     && npm audit --omit=dev --audit-level=high \
     && npm cache clean --force
-# Temporary carry until upstream bounds its DOM-click fallback; fails the build if
-# the base's code differs. See examples/camofox-click-timeout.mjs. Older bases can
-# build with CAMOFOX_CLICK_PATCH=0 and keep the 30 s click hang (HTTP 410).
+# Temporary carry until upstream fixes /click: bounds its DOM-click fallback and
+# treats a delivered click whose navigation is slow as success instead of running
+# fallbacks. Fails the build if the base's code differs; see
+# examples/camofox-click-timeout.mjs. Older bases can build with
+# CAMOFOX_CLICK_PATCH=0, which drops both fixes: they keep the 30 s click hang
+# (HTTP 410) and the slow-navigation 422s.
 ARG CAMOFOX_CLICK_PATCH=1
 COPY examples/camofox-click-timeout.mjs /tmp/camofox-click-timeout.mjs
 RUN if [ "$CAMOFOX_CLICK_PATCH" = "1" ]; then node /tmp/camofox-click-timeout.mjs /app/server.js; fi \

@@ -38,9 +38,19 @@ patch bounds it like the adjacent `boundingBox()` call, so the route fails withi
 about 12 seconds with its existing 422 and the client observes the page again;
 the tab and its form state survive. The patch step fails the build if the base's
 code differs, so review it whenever the base image changes and drop it once
-upstream bounds that call. To build an older `CAMOFOX_BASE_IMAGE` whose code
+upstream bounds that call. The same step fixes a second fallback problem: when a
+click navigates to a slow page, Playwright reports the click as done and then
+times out waiting for the navigation, and the route ran force, DOM and mouse
+fallbacks against a page that had already gone, returning 422 after about 12
+seconds for a click that worked. The patched route's click wrapper, which every
+attempt goes through (the first click, forced retries and the search-results
+path), instead waits, bounded inside its budget, for that navigation to commit
+and reports success. To build an older
+`CAMOFOX_BASE_IMAGE` whose code
 differs, pass `--build-arg CAMOFOX_CLICK_PATCH=0`; that image keeps the 30-second
-click hang and its HTTP 410s.
+click hang, its HTTP 410s and the slow-navigation 422s. The client records a
+click that the server abandoned after it was sent as a step with `effect`
+(`taken` when the page moved, otherwise `uncertain`), so it is not lost either way.
 
 Clients that opened their own tab also recover from a 410 during a read, when no
 action was in flight: they reopen the most recently observed page in the same

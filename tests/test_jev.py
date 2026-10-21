@@ -343,12 +343,14 @@ def test_recent_actions_tell_jev_which_page_each_action_was_on(monkeypatch, key)
     post = goal_reply("CLICK", 0.5)
     monkeypatch.setattr(jev, "post_json", post)
     history = [{"action": "42 comments", "kind": "click", "text": None, "page_changed": True, "confidence": 0.9,
-                "from_url": "https://news.example.test/", "url_after": "https://news.example.test/item?id=1"}]
+                "from_url": "https://news.example.test/", "url_after": "https://news.example.test/item?id=1",
+                "effect": "taken", "download": None}]
     jev.choose(make_state(), "open the comments", history)
     # Named so Jev cannot read the page an action ran on as the page it led to.
     assert post.bodies[0]["state"]["recent_actions"] == [
         {"action": "42 comments", "kind": "click", "text": None, "page_changed": True,
-         "from_url": "https://news.example.test/", "url_after": "https://news.example.test/item?id=1"}]
+         "from_url": "https://news.example.test/", "url_after": "https://news.example.test/item?id=1",
+         "effect": "taken", "download": None}]
 
 
 def test_token_usage_is_totalled_per_model_for_the_task(monkeypatch, key):

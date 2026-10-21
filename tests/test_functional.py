@@ -69,6 +69,22 @@ new MutationObserver(()=>{
     document.getElementById('new').style.display='';cover.remove();},1000);
 }).observe(document.getElementById('old'),{attributes:true});</script>'''
 
+# A link to a page that answers slowly, a menu that opens 1.2 s after its click,
+# and a link that downloads a file instead of navigating.
+NAV_HTML = b'<!doctype html><title>Start</title><a href="/slow">Open the slow page</a>'
+SLOW_HTML = b'<!doctype html><title>Slow</title><p>Slow page loaded</p>'
+MENU_HTML = b'''<!doctype html><title>Menu</title>
+<button aria-expanded="false" onclick="setTimeout(()=>{const open=this.getAttribute('aria-expanded')==='true';
+this.setAttribute('aria-expanded',String(!open));document.getElementById('menu').hidden=open},1200)">Trip type</button>
+<ul id="menu" role="listbox" hidden><li role="option">Round trip</li><li role="option">One way</li></ul>'''
+DOWNLOAD_HTML = b'<!doctype html><title>Get it</title><a href="/installer.bin">Download installer</a>'
+# A link that never stops moving fails Playwright's stability check, so Camofox
+# retries with a forced click; that forced click opens a slow page.
+JIGGLE_HTML = b'''<!doctype html><title>Moving</title>
+<style>@keyframes jiggle{from{transform:translateX(0)}to{transform:translateX(2px)}}
+a{display:inline-block;padding:20px;animation:jiggle .1s infinite alternate}</style>
+<a href="/slow-forced">Open the slow page</a>'''
+
 
 @pytest.fixture
 def local_provider():
@@ -88,7 +104,20 @@ def local_provider():
             self.wfile.write(data)
 
         def do_GET(self):
-            pages = {"/vision": VISION_HTML, "/overlay": OVERLAY_HTML, "/code": CODE_HTML, "/swap": SWAP_HTML}
+            if self.path == "/installer.bin":
+                self.send_response(200)
+                self.send_header("Content-Disposition", 'attachment; filename="installer.bin"')
+                self.send_header("Content-Length", "4096")
+                self.end_headers()
+                self.wfile.write(b"x" * 4096)
+                return
+            if self.path == "/slow-forced":
+                requests_seen.append(self.path)  # each activation of the moving link
+            if self.path in {"/slow", "/slow-forced"}:
+                time.sleep(6)
+            pages = {"/vision": VISION_HTML, "/overlay": OVERLAY_HTML, "/code": CODE_HTML, "/swap": SWAP_HTML,
+                     "/nav": NAV_HTML, "/slow": SLOW_HTML, "/menu": MENU_HTML, "/download": DOWNLOAD_HTML,
+                     "/jiggle": JIGGLE_HTML, "/slow-forced": SLOW_HTML}
             self.reply(200, pages.get(self.path, HTML), "text/html")
 
         def do_POST(self):
@@ -456,3 +485,77 @@ def test_installed_click_on_a_target_swapped_after_tagging_is_stale_not_a_destro
                             cwd=tmp_path, env={**os.environ, "PYTHONPATH": str(installed_package)},
                             capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+INPUT_CHECKS = '''import sys, time, uuid
+from jev_browser.camofox import Camofox, Page
+from jev_browser.policy import URLPolicy
+base, key, site = sys.argv[1:4]
+def opened(path):
+    identity = "jev-input-" + uuid.uuid4().hex
+    cf = Camofox.open(base, identity, identity, site + path, headers={"Authorization": "Bearer " + key},
+                      guard=URLPolicy(allow_private=True))
+    page = Page(cf)
+    return cf, page, page.observe()
+cf, page, state = opened("/nav")
+try:
+    started = time.monotonic()
+    page.act(next(a for a in state["actions"] if a["kind"] == "click"), state)  # no StalePage: it worked
+    after = page.observe()
+    assert after["url"].endswith("/slow") and "Slow page loaded" in after["text"], after["url"]
+    assert time.monotonic() - started < 12, time.monotonic() - started  # no fallbacks after the click landed
+finally:
+    cf.close_session()
+cf, page, state = opened("/menu")
+try:
+    page.act(next(a for a in state["actions"] if a["label"] == "Trip type"), state)
+    options = [a["label"] for a in page.observe()["actions"] if a.get("role") == "option"]
+    assert options == ["Round trip", "One way"], options  # read after the menu opened, not before
+finally:
+    cf.close_session()
+cf, page, state = opened("/download")
+try:
+    page.act(next(a for a in state["actions"] if a["kind"] == "click"), state)
+    assert page.observe()["url"].endswith("/download")
+    assert page.new_downloads() == ["installer.bin"]
+finally:
+    cf.close_session()
+'''
+
+
+def test_installed_clicks_that_navigate_slowly_open_menus_late_or_download_are_observed(
+        installed_package, local_provider, disposable_browser, tmp_path):
+    port, _ = local_provider
+    url, key = disposable_browser
+    result = subprocess.run([sys.executable, "-c", INPUT_CHECKS, url, key, f"http://127.0.0.1:{port}"],
+                            cwd=tmp_path, env={**os.environ, "PYTHONPATH": str(installed_package)},
+                            capture_output=True, text=True, timeout=180)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+FORCED_CHECK = """import sys, time, uuid
+from jev_browser.camofox import Camofox, Page
+from jev_browser.policy import URLPolicy
+base, key, site = sys.argv[1:4]
+identity = "jev-forced-" + uuid.uuid4().hex
+cf = Camofox.open(base, identity, identity, site + "/jiggle", headers={"Authorization": "Bearer " + key},
+                  guard=URLPolicy(allow_private=True))
+try:
+    page = Page(cf)
+    state = page.observe()
+    page.act(next(a for a in state["actions"] if a["kind"] == "click"), state)  # no ActionUncertain
+    assert page.observe()["url"].endswith("/slow-forced")
+finally:
+    cf.close_session()
+"""
+
+
+def test_installed_forced_click_into_a_slow_page_activates_it_once(
+        installed_package, local_provider, disposable_browser, tmp_path):
+    port, seen = local_provider
+    url, key = disposable_browser
+    result = subprocess.run([sys.executable, "-c", FORCED_CHECK, url, key, f"http://127.0.0.1:{port}"],
+                            cwd=tmp_path, env={**os.environ, "PYTHONPATH": str(installed_package)},
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert seen.count("/slow-forced") == 1, seen  # the fallbacks never activated the departed page again

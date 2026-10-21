@@ -33,7 +33,7 @@ class Stub:
                 self.end_headers()
                 self.wfile.write(data)
 
-            do_POST = do_DELETE = _reply
+            do_POST = do_DELETE = do_GET = _reply
 
             def log_message(self, *args):
                 pass
@@ -386,3 +386,65 @@ def test_a_supervisor_key_press_needs_a_fresh_page_and_settles_before_the_next_r
     assert cf.calls[0] == ("press", "ArrowDown") and ("settle",) in cf.calls
     with pytest.raises(StalePage):
         Page(FakeCamofox(fresh=False)).press("Enter", state)
+
+
+
+def test_a_rejected_input_after_the_target_check_is_uncertain_not_stale():
+    cf, state = FakeCamofox(), make_state()
+
+    def abandoned(x, y, selector):  # e.g. the click navigated, then the server's fallbacks gave up
+        raise StalePage("/tabs/t/click: page changed (HTTP 422)")
+
+    cf.click_at = abandoned
+    page = Page(cf)
+    with pytest.raises(camofox.ActionUncertain):
+        page.act(action(state, "e2"), state)
+    assert page.after_input is not None  # the next read still settles
+    with pytest.raises(StalePage) as refused:  # a target check that fails before input stays plain stale
+        Page(FakeCamofox(target="covered")).act(action(state, "e2"), state)
+    assert not isinstance(refused.value, camofox.ActionUncertain)
+
+
+def test_downloads_are_listed_without_file_data(stub):
+    stub.replies = [(200, {"tabId": "t", "downloads": [{"id": "d1", "suggestedFilename": "setup.exe"}, "junk"]})]
+    assert Camofox(stub.url, "u 1", "t").downloads() == [{"id": "d1", "suggestedFilename": "setup.exe"}]
+    assert stub.requests[0][:2] == ("GET", "/tabs/t/downloads?userId=u%201")
+    stub.replies = [(200, {"tabId": "t"})]
+    with pytest.raises(CamofoxError, match="malformed"):
+        Camofox(stub.url, "u", "t").downloads()
+
+
+def test_a_click_reports_only_downloads_it_started():
+    cf, state = FakeCamofox(), make_state()
+    both = [{"id": "old", "suggestedFilename": "earlier.pdf"}, {"id": "new", "suggestedFilename": "setup.exe"}]
+    listings = iter([[{"id": "old", "suggestedFilename": "earlier.pdf"}],
+                     [{"id": "old", "suggestedFilename": "earlier.pdf"}], both, both])
+    cf.downloads = lambda: next(listings)
+    page = Page(cf, sleep=lambda s: None)
+    page.act(action(state, "e2"), state)  # the baseline is taken before the first click
+    assert page.new_downloads() == ["setup.exe"] and page.new_downloads(wait=0) == []
+
+
+def test_download_detection_is_skipped_where_the_server_has_no_route():
+    cf, state = FakeCamofox(), make_state()
+
+    def missing():
+        raise CamofoxError("Camofox /tabs/t/downloads returned HTTP 404")
+
+    cf.downloads = missing
+    page = Page(cf, sleep=lambda s: pytest.fail("no polling without a baseline"))
+    page.act(action(state, "e2"), state)
+    assert page.new_downloads() == []
+
+
+def test_settle_waits_for_a_toggled_control_to_change_state():
+    assert "aria-expanded" in camofox.SETTLE_JS and "action.expanded" in camofox.SETTLE_JS
+
+
+def test_a_failed_download_is_not_reported_as_started():
+    cf, state = FakeCamofox(), make_state()
+    listings = iter([[], [{"id": "d1", "suggestedFilename": "setup.exe", "failure": "canceled"}]])
+    cf.downloads = lambda: next(listings)
+    page = Page(cf, sleep=lambda s: None)
+    page.act(action(state, "e2"), state)
+    assert page.new_downloads(wait=0) == []

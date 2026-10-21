@@ -9,7 +9,7 @@ between calls so a resumed goal knows what already happened.
 
 import time
 
-from .camofox import CamofoxError, StalePage, TabGone
+from .camofox import ActionUncertain, CamofoxError, StalePage, TabGone
 from .jev import ModelError, action_space, choose, field_context, field_text, goal_met, verify_visual
 from .policy import URLPolicy, action_block
 from .budget import Budget, BudgetExceeded, current, limits
@@ -123,6 +123,8 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
         out["steps"] = steps
         if recoveries:
             out["recoveries"] = recoveries
+        if downloads := [h["download"] for h in history if h.get("download")]:
+            out["downloads"] = downloads
         out["jev_calls"] = len(decisions)
         models = list(dict.fromkeys(d["model"] for d in decisions if isinstance(d.get("model"), str)))
         if models:
@@ -186,11 +188,14 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                             if escalate():
                                 continue
                             return result("paused", "low_confidence", confidence=decision["confidence"])
-                        if using_vision:
+                        # Only a visual requirement needs visual proof; an escalation only helped
+                        # choose actions, so the text DONE rules and goal check apply.
+                        if visual.required:
                             fresh = capture()
                             if not frame.unchanged(fresh) or state["fingerprint"] != fresh.state["fingerprint"]:
                                 raise StalePage("Visual completion changed.")
-                            if not verify_visual(fresh, goal, visual, history):
+                            if not verify_visual(fresh, goal, visual, history,
+                                                 goal_check=decision.get("completion_probability")):
                                 return result("paused", "vision_completion_unverified")
                             verified_frame = capture()
                             if (not fresh.unchanged(verified_frame)
@@ -217,6 +222,20 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                 action = next(a for a in state["actions"] if a["id"] == choice)
                 if reason := action_block(action):
                     return result("paused", reason)
+                same = (action["label"], action["kind"], state["url"])
+                last = history[-1] if history else {}
+                if (last.get("page_changed") is False and not last.get("download") and hasattr(page, "new_downloads")
+                        and (last.get("action"), last.get("kind"), last.get("from_url")) == same):
+                    # About to repeat a click that changed nothing: its download may have landed since.
+                    if files := page.new_downloads():
+                        last["download"] = files[0]
+                if any(h.get("download") and (h.get("action"), h.get("kind"), h.get("from_url")) == same
+                       for h in history):
+                    return result("paused", "download_started")  # never fetch the same file again
+                if (last.get("effect") == "uncertain" and last.get("page_changed") is False
+                        and (last.get("action"), last.get("kind"), last.get("from_url")) == same):
+                    # The browser may have delivered it (a slow submission): never send it twice.
+                    return result("paused", "action_uncertain")
                 text = None
                 if action["kind"] == "fill":
                     text = field_text(field_context(goal, action, frame.safe if using_vision else state, history))
@@ -230,8 +249,11 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                         raise StalePage("Visual target changed.")
                     state = cleared = fresh.state
                     frame = fresh
+                effect = None
                 try:
                     page.act(action, state, text=text)
+                except ActionUncertain:
+                    effect = "uncertain"  # recorded below; the re-observation shows what happened
                 except TabGone:
                     return tab_lost(action, text)
             except TabGone as gone:
@@ -264,14 +286,20 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
             }
             steps.append(step)
             history.append(step)
-            previous = state["fingerprint"]
+            before = state
             try:
                 state = latest = page.observe()
             except TabGone:
                 steps.pop()
                 history.pop()
                 return tab_lost(action, text)
-            step["page_changed"] = state["fingerprint"] != previous
+            step["page_changed"] = state["fingerprint"] != before["fingerprint"]
+            if effect:
+                moved = state["url"] != before["url"] or state["page_key"][:1] != before["page_key"][:1]
+                step["effect"] = "taken" if moved else "uncertain"
+            if action["kind"] == "click" and not step["page_changed"] and hasattr(page, "new_downloads"):
+                if files := page.new_downloads():
+                    step["download"] = files[0]
     except BudgetExceeded as e:
         return result("paused", str(e))
     except VisionUnavailable as e:

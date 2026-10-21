@@ -32,7 +32,7 @@ def test_required_visual_action_and_completion_are_checked(monkeypatch):
     page = VisualPage([f])
     decisions = iter([decision("e1", "CLICK", target_confidence=.99), decision("DONE")])
     monkeypatch.setattr(loop, "choose", lambda *a, **k: next(decisions))
-    monkeypatch.setattr(loop, "verify_visual", lambda *a: True)
+    monkeypatch.setattr(loop, "verify_visual", lambda *a, **k: True)
     out = run(page, require_visual=True)
     assert out["status"] == "done" and out["vision"]["verified"]
     assert page.acted == [("e1", None)] and page.captures == 5
@@ -43,7 +43,7 @@ def test_required_visual_action_and_completion_are_checked(monkeypatch):
 def test_done_requires_visual_completion_and_freshness(monkeypatch, verified):
     page = VisualPage([frame()])
     monkeypatch.setattr(loop, "choose", lambda *a, **k: decision("DONE"))
-    monkeypatch.setattr(loop, "verify_visual", lambda *a: verified)
+    monkeypatch.setattr(loop, "verify_visual", lambda *a, **k: verified)
     out = run(page, require_visual=True)
     assert out["status"] == ("done" if verified else "paused")
     assert out["vision"]["verified"] is verified
@@ -58,7 +58,7 @@ def test_auto_escalates_once_on_low_confidence(monkeypatch):
         calls.append(bool(k.get("frame")))
         return decision("DONE", confidence=.2 if not k else .99)
     monkeypatch.setattr(loop, "choose", choose)
-    monkeypatch.setattr(loop, "verify_visual", lambda *a: True)
+    monkeypatch.setattr(loop, "verify_visual", lambda *a, **k: True)
     out = run(page)
     assert out["status"] == "done" and calls == [False, True]
     assert out["vision"]["escalations"] == 1
@@ -134,6 +134,24 @@ def test_every_image_retry_consumes_image_budget(monkeypatch):
         jev.post_json(jev.DECISIONS_URL, {}, frame=f, vision_run=run_state)
 
 
+@pytest.mark.parametrize("value, goal_check, expected", [
+    (.97, None, True), (.94, None, False),
+    (.85, .95, True),    # corroborated: two heads agree on the same image
+    (.85, .5, False), (.79, .99, False), (.85, None, False),
+])
+def test_visual_completion_needs_a_strong_or_corroborated_yes(monkeypatch, value, goal_check, expected):
+    monkeypatch.setattr(jev, "post_json", lambda *a, **k: {"answers": {"satisfied": {"noul": value}}})
+    assert jev.verify_visual(frame(), "red", VisionRun(VisionSettings(enabled=True)), goal_check=goal_check) is expected
+
+
+def test_visual_completion_asks_about_the_goals_end_state(monkeypatch):
+    seen = []
+    monkeypatch.setattr(jev, "post_json", lambda url, body, **k: seen.append(body) or {"answers": {"satisfied": {"noul": .99}}})
+    jev.verify_visual(frame(), "Open the menu", VisionRun(VisionSettings(enabled=True)))
+    question = seen[0]["questions"]["satisfied"]["instructions"]["question"]
+    assert "end state" in question and "Masked" in question and "untrusted" in question
+
+
 @pytest.mark.parametrize("value,expected", [(1, True), (.94, False), (float("nan"), None), ("1", None)])
 def test_verification_validates_noul(monkeypatch, value, expected):
     monkeypatch.setattr(jev, "post_json", lambda *a, **k: {"answers": {"satisfied": {"noul": value}}})
@@ -166,7 +184,7 @@ def test_completion_changed_during_verification_is_never_done(monkeypatch):
         return blue if page.captures % 3 == 0 else red
     page.observe_vision = capture
     monkeypatch.setattr(loop, 'choose', lambda *a, **k: decision('DONE'))
-    monkeypatch.setattr(loop, 'verify_visual', lambda *a: True)
+    monkeypatch.setattr(loop, 'verify_visual', lambda *a, **k: True)
     out = run(page, require_visual=True)
     assert out['status'] != 'done' and not out['vision']['verified']
 
@@ -189,10 +207,10 @@ def test_only_required_visual_runs_use_the_strict_floors(monkeypatch, mode):
     decisions = iter([*escalation, decision("e1", "CLICK", confidence=.6, target_confidence=.5),
                       decision("DONE", confidence=.6)])
     monkeypatch.setattr(loop, "choose", lambda *a, **k: next(decisions))
-    monkeypatch.setattr(loop, "verify_visual", lambda *a: True)
+    monkeypatch.setattr(loop, "verify_visual", lambda *a, **k: True)
     out = run(page, vision=mode)
     assert out["status"] == "done" and page.acted == [("e1", None)]
-    assert out["vision"]["escalations"] == (1 if mode == "auto" else 0) and out["vision"]["verified"]
+    assert out["vision"]["escalations"] == (1 if mode == "auto" else 0) and not out["vision"]["verified"]
 
 
 def two_buttons():
@@ -266,6 +284,36 @@ def test_a_box_resolved_target_acts_below_the_target_floor(monkeypatch):
     decisions = iter([{**decision("e1", "CLICK", target_confidence=.1), "target_source": "box"},
                       decision("DONE")])
     monkeypatch.setattr(loop, "choose", lambda *a, **k: next(decisions))
-    monkeypatch.setattr(loop, "verify_visual", lambda *a: True)
+    monkeypatch.setattr(loop, "verify_visual", lambda *a, **k: True)
     out = run(page, require_visual=True)
     assert out["status"] == "done" and page.acted == [("e1", None)]
+
+
+def test_an_auto_escalated_run_finishes_on_the_text_rules(monkeypatch):
+    page = VisualPage([frame()])
+    decisions = iter([decision("BLOCKED"), decision("DONE", confidence=.6)])
+    monkeypatch.setattr(loop, "choose", lambda *a, **k: next(decisions))
+    monkeypatch.setattr(loop, "verify_visual", lambda *a, **k: pytest.fail("escalation only helps choose actions"))
+    out = run(page, vision="auto")
+    assert out["status"] == "done" and out["vision"]["escalations"] == 1 and not out["vision"]["verified"]
+
+
+def test_a_required_visual_finish_passes_the_goal_check_to_verification(monkeypatch):
+    page = VisualPage([frame()])
+    monkeypatch.setattr(loop, "choose", lambda *a, **k: {**decision("DONE"), "completion_probability": .96})
+    seen = []
+    monkeypatch.setattr(loop, "verify_visual", lambda *a, **k: seen.append(k) or True)
+    assert run(page, require_visual=True)["status"] == "done" and seen == [{"goal_check": .96}]
+
+
+def test_visual_verification_never_counts_an_unconfirmed_action_as_evidence(monkeypatch):
+    seen = []
+    monkeypatch.setattr(jev, "post_json", lambda url, body, **k: seen.append(body) or {"answers": {"satisfied": {"noul": .99}}})
+    history = [{"action": "Code", "kind": "click", "text": None, "page_changed": True, "effect": "taken"},
+               {"action": "Submit", "kind": "click", "text": None, "page_changed": False, "effect": "uncertain"},
+               {"action": "Search", "kind": "fill", "text": "x", "page_changed": True}]
+    jev.verify_visual(frame(), "Open the menu", VisionRun(VisionSettings(enabled=True)), history)
+    evidence = seen[0]["state"][0]["executed_actions"]
+    assert [step["action"] for step in evidence] == ["Code", "Search"]
+    assert evidence[0]["effect"] == "taken"
+    assert "absent or ambiguous evidence does not" in seen[0]["questions"]["satisfied"]["instructions"]["question"].lower()
