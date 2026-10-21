@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jev-browser"
+version = "0.3.0"
+description = "Jev browser execution for agents through Python, CLI, MCP, and Hermes."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "LICENSE-jev-ultrafast"]
+requires-python = ">=3.11"
+dependencies = ["requests>=2.33.0,<3"]
+
+[project.optional-dependencies]
+mcp = ["mcp>=2.0,<3"]
+vision = ["Pillow>=12.3,<13"]
+dev = ["pytest>=8", "coverage>=7", "build>=1.2", "setuptools>=77", "mcp>=2.0,<3", "Pillow>=12.3,<13"]
+
+[project.urls]
+Repository = "https://github.com/harmanbassi/jev-agent-browser"
+Issues = "https://github.com/harmanbassi/jev-agent-browser/issues"
+
+[project.scripts]
+jev-browser = "jev_browser.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["jev_browser*"]
+
+[tool.setuptools.package-data]
+jev_browser = ["snapshot.js", "plugin.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]
+addopts = "-p no:cacheprovider"
+
+[tool.coverage.run]
+source = ["jev_browser"]

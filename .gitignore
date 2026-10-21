@@ -1,0 +1,19 @@
+__pycache__/
+.coverage
+coverage.json
+.pytest_cache/
+.env
+.env.*
+!.env.example
+.venv/
+build/
+dist/
+*.egg-info/
+# Local development policies and private gate tooling never belong in releases.
+.claude/
+scripts/gate*.py
+scripts/gate.sh
+scripts/mutate-python.py
+scripts/test-stack.sh.example
+camofox.config.json
+.camofox/

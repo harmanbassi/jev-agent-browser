@@ -1,0 +1,13 @@
+Upstream attribution — MIT
+
+Parts of jev-browser are adapted from browser-use/jev-ultrafast@1231850:
+https://github.com/browser-use/jev-ultrafast/tree/1231850
+
+Copyright (c) 2026 Browser Use
+
+The complete upstream MIT permission grant, conditions and warranty disclaimer
+are reproduced in LICENSE, together with the upstream copyright notice. Both
+files are included in source and binary distributions.
+
+Adaptations replace CDP with Camofox REST input, add pause/resume semantics,
+and provide OpenRouter, Hermes and standalone agent integration.

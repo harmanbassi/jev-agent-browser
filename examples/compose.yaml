@@ -1,0 +1,25 @@
+services:
+  camofox:
+    build:
+      context: ..
+      dockerfile: examples/Dockerfile
+    image: jev-camofox:local
+    ports:
+      - "127.0.0.1:${CAMOFOX_PORT:-9377}:9377"
+    environment:
+      CAMOFOX_PORT: "9377"
+      CAMOFOX_ACCESS_KEY: ${CAMOFOX_ACCESS_KEY:?Set a random CAMOFOX_ACCESS_KEY in .env}
+      CAMOFOX_CRASH_REPORT_ENABLED: "false"
+      MAX_OLD_SPACE_SIZE: ${CAMOFOX_HEAP_MB:-512}
+      PROXY_HOST: ${PROXY_HOST:-}
+      PROXY_PORT: ${PROXY_PORT:-}
+      PROXY_USERNAME: ${PROXY_USERNAME:-}
+      PROXY_PASSWORD: ${PROXY_PASSWORD:-}
+    # State belongs to this container; no host cookie/profile directories mounted.
+    shm_size: 1gb
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9377/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12

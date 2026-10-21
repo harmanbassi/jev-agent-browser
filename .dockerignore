@@ -1,0 +1,9 @@
+**
+!examples/
+!examples/Dockerfile
+!camofox_plugin/
+!camofox_plugin/jev_vision/
+!camofox_plugin/jev_vision/index.js
+!camofox_plugin/jev_vision/plugin.json
+!jev_browser/
+!jev_browser/snapshot.js

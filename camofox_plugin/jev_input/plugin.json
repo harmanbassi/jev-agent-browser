@@ -1,0 +1,1 @@
+{ "name": "jev_input", "description": "Lean pointer click for jev-browser: real mouse events at viewport coordinates, no post-click settle or ref rebuild." }
