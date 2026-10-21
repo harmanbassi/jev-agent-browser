@@ -12,13 +12,20 @@ import time
 
 import requests
 
-from .questions import NEXT_ACTION, TARGET, TEXT_VALUE
+from .questions import GOAL_CHECK, NEXT_ACTION, TARGET, TEXT_VALUE
 from .budget import request_timeout
 from .config import endpoint, flag, placeholder_key
 from .environment import get
 
 DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
 CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+# The goal check is a Noul: a calibrated probability that the goal is already met.
+# A false yes hands an unfinished task back as done, so overriding the operation
+# head needs a strong yes (0.9, TypeSafe's own example for a costly false yes).
+# Overruling DONE needs only a clear no; the next-best operation then still has
+# to clear the usual confidence floors before anything executes.
+GOAL_MET = 0.9
+GOAL_UNMET = 0.2
 _HTTP = requests.Session()
 _HTTP.max_redirects = 0  # Never forward a provider key via a redirect.
 
@@ -82,6 +89,19 @@ def validate_choice(answer, ids):
     return answer
 
 
+def choice_confidence(probabilities):
+    """TypeSafe's Choice confidence: how far the top probability sits above an even split."""
+    probabilities = list(probabilities)
+    n = len(probabilities)
+    return 1.0 if n < 2 else (max(probabilities) - 1 / n) / (1 - 1 / n)
+
+
+def noul(answer):
+    """A valid Noul probability, or None."""
+    value = answer.get("noul") if isinstance(answer, dict) else None
+    return value if type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1 else None
+
+
 def action_space(actions):
     """One index per observed element; each operation has its own valid target choices."""
     elements, indices, targets, controls = [], {}, {}, {}
@@ -135,7 +155,8 @@ def choose(state, goal, history, *, frame=None, vision_run=None):
     operations.update({key: value["label"] for key, value in controls.items()})
     operations.update(STOPS)
     questions = {
-        "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": NEXT_ACTION}}
+        "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": NEXT_ACTION}},
+        "goal_satisfied": {"type": "noul", "instructions": {"goal": goal, "question": GOAL_CHECK}},
     }
     for operation, candidates in targets.items():
         questions[operation.lower() + "_target"] = {
@@ -190,7 +211,17 @@ def choose(state, goal, history, *, frame=None, vision_run=None):
     if not isinstance(answers, dict):
         raise ModelError("Jev response had no answers; no action executed.")
     operation_answer = validate_choice(answers.get("operation", {}), operations)
-    operation = operation_answer["choice"]
+    operation, confidence = operation_answer["choice"], operation_answer["confidence"]
+    # An optional head: a missing or malformed goal check changes nothing.
+    completion, goal_check = noul(answers.get("goal_satisfied")), None
+    if completion is not None and operation != "DONE" and completion >= GOAL_MET:
+        operation, confidence, goal_check = "DONE", 2 * completion - 1, "met"  # Noul confidence |2p-1|
+    elif completion is not None and operation == "DONE" and completion <= GOAL_UNMET:
+        rest = {k: p for k, p in operation_answer["probabilities"].items() if k != "DONE"}
+        total = sum(rest.values())
+        operation = max(rest, key=rest.get)
+        confidence = choice_confidence(p / total for p in rest.values()) if total else 0.0
+        goal_check = "unmet"
     target_confidence = None
     if operation in targets:
         # Unused target heads cannot cause an action. Validate the head the operation selected.
@@ -206,8 +237,10 @@ def choose(state, goal, history, *, frame=None, vision_run=None):
     return {
         "choice": choice,
         "operation": operation,
-        "confidence": operation_answer["confidence"],
+        "confidence": confidence,
         "target_confidence": target_confidence,
+        "completion_probability": completion,
+        "goal_check": goal_check,
         "latency_ms": round((time.perf_counter() - started) * 1000),
         "usage": result.get("usage", {}),
         "model": result.get("model", body["model"]),

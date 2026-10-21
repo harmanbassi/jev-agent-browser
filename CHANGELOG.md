@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Ask a goal check with every decision (same request): finish on a confident yes,
+  overrule an unsupported `DONE` on a confident no, and report
+  `completion_probability` / `done_by` in results.
 - Update the browser image's MCP TypeScript SDK pin to 1.32.1 so fresh builds
   pass the current dependency security audit.
 

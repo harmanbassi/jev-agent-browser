@@ -113,6 +113,26 @@ Tool flow:
 Sessions are process-local, capped at 16, and expire after 15 idle minutes when
 next accessed or a new session is opened. Server shutdown attempts cleanup.
 
+### Task results
+
+Every interface (Python, CLI, MCP, Hermes) returns the same result fields:
+
+| Field | Meaning |
+| --- | --- |
+| `status` | `done`, `paused` (with `reason`) or `error` |
+| `url`, `title`, `text` | The last page read, when it passed the URL policy |
+| `elements` | On `paused`: the observed controls Jev could act on |
+| `steps` | Executed actions with their confidences and `page_changed` |
+| `jev_calls`, `model_requests` | Decisions made; model HTTP requests including retries/helpers |
+| `completion_probability` | The last decision's goal check: probability the goal is already met |
+| `done_by` | `goal_check` when that check (at least 0.9), not the operation choice, finished the task |
+
+Every decision also asks Jev, in the same request, whether the goal is already
+met. A confident yes finishes the task even when the operation head wanted to
+keep going; a confident no (at most 0.2) overrules a `DONE` choice, and the
+next-best operation must still clear the usual confidence floors. Goals that
+ask for an action (open, submit, send) are not met by a page that only offers it.
+
 ## Optional visual browsing
 
 Jev 1.14 can use images alongside page text. Vision is **off by default** and

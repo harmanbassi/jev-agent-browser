@@ -100,6 +100,10 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
         models = list(dict.fromkeys(d["model"] for d in decisions if isinstance(d.get("model"), str)))
         if models:
             out["models"] = models
+        if decisions and decisions[-1].get("completion_probability") is not None:
+            out["completion_probability"] = decisions[-1]["completion_probability"]
+            if status == "done" and decisions[-1].get("goal_check") == "met":
+                out["done_by"] = "goal_check"
         out["model_requests"] = current.get().calls
         out["elapsed_ms"] = round((time.perf_counter() - started) * 1000)
         if vision_mode != "off":

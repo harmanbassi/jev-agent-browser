@@ -167,3 +167,59 @@ def test_field_text_raises_after_two_malformed_answers(monkeypatch, key):
 def test_field_context_caps_page_text():
     ctx = jev.field_context("g", {"label": "L"}, make_state(text="x" * 9000), [])
     assert len(ctx["page"]["text"]) == 6000
+
+
+def goal_reply(operation, probability, *, operation_probabilities=None, target="2"):
+    """A reply whose goal check answers `probability` alongside the usual heads."""
+    def post_json(url, body):
+        post_json.bodies.append(body)
+        ops = list(body["questions"]["operation"]["criteria"])
+        op = answer(operation, ops, 0.9)
+        if operation_probabilities:
+            op["probabilities"] = {i: operation_probabilities.get(i, 0.0) for i in ops}
+        targets = list(body["questions"]["click_target"]["criteria"])
+        answers = {"operation": op, "click_target": answer(target, targets, 0.9)}
+        if probability is not None:
+            answers["goal_satisfied"] = {"type": "noul", "noul": probability}
+        return {"answers": answers}
+    post_json.bodies = []
+    return post_json
+
+
+def test_every_decision_asks_whether_the_goal_is_met_in_the_same_request(monkeypatch, key):
+    post = goal_reply("CLICK", 0.5)
+    monkeypatch.setattr(jev, "post_json", post)
+    jev.choose(make_state(), "open the first result", [])
+    question = post.bodies[0]["questions"]["goal_satisfied"]
+    assert len(post.bodies) == 1 and question["type"] == "noul"
+    assert question["instructions"]["goal"] == "open the first result"
+    assert "submit" in question["instructions"]["question"]  # an offered action is not a completed one
+
+
+def test_a_confident_goal_check_finishes_although_another_operation_was_chosen(monkeypatch, key):
+    monkeypatch.setattr(jev, "post_json", goal_reply("CLICK", 0.96))
+    d = jev.choose(make_state(), "open the comments", [])
+    assert d["choice"] == d["operation"] == "DONE" and d["goal_check"] == "met"
+    assert d["confidence"] == pytest.approx(0.92) and d["completion_probability"] == 0.96
+
+
+@pytest.mark.parametrize("probability", [None, 0.5, 0.89, float("nan"), "0.99", 1.5])
+def test_an_action_the_goal_still_requires_is_taken(monkeypatch, key, probability):
+    monkeypatch.setattr(jev, "post_json", goal_reply("CLICK", probability))
+    d = jev.choose(make_state(), "submit the form", [])
+    assert d["choice"] == "e2" and d["operation"] == "CLICK" and d.get("goal_check") is None
+    assert d["completion_probability"] == (probability if probability in (0.5, 0.89) else None)
+
+
+def test_done_contradicted_by_the_goal_check_continues_with_the_next_best_operation(monkeypatch, key):
+    probabilities = {"DONE": 0.6, "CLICK": 0.3, "WAIT": 0.1}
+    monkeypatch.setattr(jev, "post_json", goal_reply("DONE", 0.1, operation_probabilities=probabilities))
+    d = jev.choose(make_state(), "submit the form", [])
+    # Renormalized without DONE: CLICK 0.75 of five remaining operations.
+    assert d["choice"] == "e2" and d["operation"] == "CLICK" and d["goal_check"] == "unmet"
+    assert d["confidence"] == pytest.approx((0.75 - 0.2) / 0.8) and d["target_confidence"] == 0.9
+
+
+def test_done_is_kept_when_the_goal_check_is_unsure(monkeypatch, key):
+    monkeypatch.setattr(jev, "post_json", goal_reply("DONE", 0.5))
+    assert jev.choose(make_state(), "goal", [])["choice"] == "DONE"

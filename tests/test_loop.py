@@ -254,3 +254,12 @@ def test_long_text_and_element_tables_are_capped(monkeypatch):
     out = loop.run_task(page, "goal")
 
     assert len(out["text"]) == loop.TEXT_LIMIT and len(out["elements"]) == loop.ELEMENT_LIMIT
+
+
+def test_results_report_the_last_goal_check(monkeypatch):
+    page = FakePage([make_state()])
+    script(monkeypatch, [{**decision("DONE"), "completion_probability": 0.97, "goal_check": "met"}])
+
+    out = loop.run_task(page, "goal")
+
+    assert out["status"] == "done" and out["completion_probability"] == 0.97 and out["done_by"] == "goal_check"
