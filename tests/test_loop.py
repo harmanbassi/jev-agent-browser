@@ -286,3 +286,26 @@ def test_each_step_records_the_page_it_was_taken_on(monkeypatch):
     out = loop.run_task(page, "goal")
 
     assert out["steps"][0]["url"] == "https://a.test/" and seen[1][0]["url"] == "https://a.test/"
+
+
+SCROLL = [{"id": "scroll_down", "kind": "scroll", "label": "Scroll down", "delta": 560}]
+
+
+def test_scrolling_through_a_changing_page_is_progress(monkeypatch):
+    page = FakePage([make_state(marker=str(i), text=f"section {i}", actions=SCROLL) for i in range(6)])
+    script(monkeypatch, [decision("scroll_down", "SCROLL")] * 4 + [decision("DONE")])
+
+    out = loop.run_task(page, "scroll to the references")
+
+    assert out["status"] == "done" and len(out["steps"]) == 4
+
+
+def test_scrolling_without_change_or_past_the_step_budget_still_pauses(monkeypatch):
+    page = FakePage([make_state(actions=SCROLL)])
+    script(monkeypatch, [decision("scroll_down", "SCROLL")] * 3)
+    assert loop.run_task(page, "goal")["reason"] == "no_progress"
+
+    endless = FakePage([make_state(marker=str(i), text=f"feed {i}", actions=SCROLL) for i in range(30)])
+    script(monkeypatch, [decision("scroll_down", "SCROLL")] * 30)
+    out = loop.run_task(endless, "goal", max_steps=12)
+    assert out["reason"] == "step_budget" and len(out["steps"]) == 12

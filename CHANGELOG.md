@@ -16,6 +16,8 @@
   freshness checks compare the captured pixels, not the encoded upload.
 - Record the page URL in each step and send it with Jev's recent actions, so a
   run can tell it already visited a page instead of navigating back and forth.
+- Do not flag repeated scrolling as `no_progress` while each scroll changes the
+  page; `max_steps` still bounds an endless feed.
 - Update the browser image's MCP TypeScript SDK pin to 1.32.1 so fresh builds
   pass the current dependency security audit.
 

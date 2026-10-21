@@ -132,7 +132,10 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                     all(s["page_changed"] is False for s in recent)
                     # A control that toggles (a picker opening and closing) changes the page
                     # every other click, so also stop on the same action three times running.
+                    # Scrolling that keeps revealing new content is progress; max_steps
+                    # bounds an endless feed.
                     or len({(s["action"], s["kind"], s["text"]) for s in recent}) == 1
+                    and not all(s["kind"] == "scroll" and s["page_changed"] for s in recent)
                 ):
                     if not escalate():
                         return result("paused", "no_progress")
