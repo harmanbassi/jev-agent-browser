@@ -111,6 +111,7 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
             if status == "done" and decisions[-1].get("goal_check") == "met":
                 out["done_by"] = "goal_check"
         out["model_requests"] = current.get().calls
+        out["usage"] = current.get().usage_summary()
         out["elapsed_ms"] = round((time.perf_counter() - started) * 1000)
         if vision_mode != "off":
             out["vision"] = visual.summary()

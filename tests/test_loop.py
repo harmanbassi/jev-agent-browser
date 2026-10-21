@@ -309,3 +309,18 @@ def test_scrolling_without_change_or_past_the_step_budget_still_pauses(monkeypat
     script(monkeypatch, [decision("scroll_down", "SCROLL")] * 30)
     out = loop.run_task(endless, "goal", max_steps=12)
     assert out["reason"] == "step_budget" and len(out["steps"]) == 12
+
+
+def test_results_report_token_usage_next_to_call_counts(monkeypatch):
+    from jev_browser.budget import current
+    page = FakePage([make_state()])
+
+    def choose(state, goal, history):
+        current.get().record("typesafe/jev-1.13", {"input_tokens": 900, "output_tokens": 40})
+        return decision("DONE")
+
+    monkeypatch.setattr(loop, "choose", choose)
+    out = loop.run_task(page, "goal")
+
+    assert out["usage"] == {"input_tokens": 900, "output_tokens": 40,
+                            "by_model": {"typesafe/jev-1.13": {"input_tokens": 900, "output_tokens": 40}}}

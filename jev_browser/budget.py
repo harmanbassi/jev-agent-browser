@@ -29,6 +29,7 @@ class Budget:
     cancel: threading.Event = field(default_factory=threading.Event)
     calls: int = 0
     started: float = field(default_factory=lambda: time.monotonic())
+    usage: dict = field(default_factory=dict)  # model -> token/cost totals
 
     def check(self):
         if self.cancel.is_set():
@@ -42,6 +43,30 @@ class Budget:
             raise BudgetExceeded("model_budget")
         self.calls += 1
         return min(default_timeout, max(0.001, self.timeout - (time.monotonic() - self.started)))
+
+
+    def record(self, model, usage):
+        """Add one reply's reported usage. Decisions report input/output tokens, chat
+        completions prompt/completion tokens; malformed values are ignored."""
+        if not isinstance(usage, dict):
+            return
+        counts = {"input_tokens": usage.get("input_tokens", usage.get("prompt_tokens")),
+                  "output_tokens": usage.get("output_tokens", usage.get("completion_tokens")),
+                  "cost": usage.get("cost")}
+        for name, value in counts.items():
+            if type(value) in (int, float) and math.isfinite(value) and value >= 0:
+                totals = self.usage.setdefault(str(model), {})
+                totals[name] = totals.get(name, 0) + value
+
+    def usage_summary(self):
+        out = {"input_tokens": 0, "output_tokens": 0}
+        for totals in self.usage.values():
+            for name, value in totals.items():
+                out[name] = out.get(name, 0) + value
+        if "cost" in out:
+            out["cost"] = round(out["cost"], 6)
+        out["by_model"] = {model: dict(totals) for model, totals in self.usage.items()}
+        return out
 
 
 def request_timeout(default_timeout):

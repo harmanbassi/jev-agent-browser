@@ -298,3 +298,24 @@ def test_recent_actions_tell_jev_which_page_each_action_was_on(monkeypatch, key)
     jev.choose(make_state(), "open the comments", history)
     assert post.bodies[0]["state"]["recent_actions"] == [
         {"action": "42 comments", "kind": "click", "text": None, "page_changed": True, "url": "https://news.example.test/"}]
+
+
+def test_token_usage_is_totalled_per_model_for_the_task(monkeypatch, key):
+    from jev_browser.budget import Budget, current
+    replies = iter([
+        Response(200, {"model": "typesafe/jev-1.13", "answers": {}, "usage": {"input_tokens": 300, "output_tokens": 20}}),
+        Response(200, {"model": "typesafe/jev-1.13", "answers": {}, "usage": {"input_tokens": 100, "output_tokens": 5}}),
+        Response(200, {"choices": [], "usage": {"prompt_tokens": 50, "completion_tokens": 7, "cost": 0.001}}),
+        Response(200, {"answers": {}, "usage": {"input_tokens": "lots", "output_tokens": -1}}),
+    ])
+    monkeypatch.setattr(jev._HTTP, "post", lambda *a, **k: next(replies))
+    token = current.set(Budget(10, 30))
+    try:
+        for model in ("~typesafe/jev-latest", "~typesafe/jev-latest", "text-helper", "other"):
+            jev.post_json("https://x.test", {"model": model})
+        assert current.get().usage_summary() == {
+            "input_tokens": 450, "output_tokens": 32, "cost": 0.001,
+            "by_model": {"typesafe/jev-1.13": {"input_tokens": 400, "output_tokens": 25},
+                         "text-helper": {"input_tokens": 50, "output_tokens": 7, "cost": 0.001}}}
+    finally:
+        current.reset(token)

@@ -13,7 +13,7 @@ import time
 import requests
 
 from .questions import GOAL_CHECK, NEXT_ACTION, TARGET, TEXT_VALUE
-from .budget import request_timeout
+from .budget import current, request_timeout
 from .config import endpoint, flag, placeholder_key
 from .environment import get
 
@@ -71,9 +71,12 @@ def post_json(url, body, *, frame=None, vision_run=None):
         if response.status_code >= 400:
             raise ModelError(f"Model provider returned HTTP {response.status_code}; no action executed.")
         try:
-            return response.json()
+            result = response.json()
         except ValueError:
             raise ModelError("Model provider returned a non-JSON reply; no action executed.") from None
+        if isinstance(result, dict) and (budget := current.get()):
+            budget.record(result.get("model") or body.get("model"), result.get("usage"))
+        return result
     raise ModelError("Model unavailable; no action executed.")
 
 

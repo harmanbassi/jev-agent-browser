@@ -18,6 +18,8 @@
   run can tell it already visited a page instead of navigating back and forth.
 - Do not flag repeated scrolling as `no_progress` while each scroll changes the
   page; `max_steps` still bounds an endless feed.
+- Report provider token usage (and cost where reported) per task in results,
+  totalled and per model, for Python, CLI, MCP and Hermes.
 - Update the browser image's MCP TypeScript SDK pin to 1.32.1 so fresh builds
   pass the current dependency security audit.
 

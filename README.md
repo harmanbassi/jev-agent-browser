@@ -124,6 +124,8 @@ Every interface (Python, CLI, MCP, Hermes) returns the same result fields:
 | `elements` | On `paused`: the observed controls Jev could act on |
 | `steps` | Executed actions with the `url` they ran on, their confidences and `page_changed` |
 | `jev_calls`, `model_requests` | Decisions made; model HTTP requests including retries/helpers |
+| `usage` | Reported `input_tokens`/`output_tokens` (and `cost` where the provider reports it) for the task, totalled and `by_model` |
+| `vision` | With vision allowed: image calls, captures, `uploaded_bytes`, escalations, verification |
 | `completion_probability` | The last decision's goal check: probability the goal is already met |
 | `done_by` | `goal_check` when that check (at least 0.9), not the operation choice, finished the task |
 
