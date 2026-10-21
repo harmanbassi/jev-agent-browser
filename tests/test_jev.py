@@ -196,11 +196,37 @@ def test_every_decision_asks_whether_the_goal_is_met_in_the_same_request(monkeyp
     assert "submit" in question["instructions"]["question"]  # an offered action is not a completed one
 
 
-def test_a_confident_goal_check_finishes_although_another_operation_was_chosen(monkeypatch, key):
-    monkeypatch.setattr(jev, "post_json", goal_reply("CLICK", 0.96))
+def test_choose_reports_the_goal_check_and_the_heads_support_for_done(monkeypatch, key):
+    probabilities = {"CLICK": 0.7, "DONE": 0.3}
+    monkeypatch.setattr(jev, "post_json", goal_reply("CLICK", 0.96, operation_probabilities=probabilities))
     d = jev.choose(make_state(), "open the comments", [])
-    assert d["choice"] == d["operation"] == "DONE" and d["goal_check"] == "met"
-    assert d["confidence"] == pytest.approx(0.92) and d["completion_probability"] == 0.96
+    assert d["operation"] == "CLICK" and d["completion_probability"] == 0.96 and d["done_probability"] == 0.3
+
+
+def check(operation="CLICK", confidence=0.9, target=0.9, done=0.0, completion=0.96):
+    return {"operation": operation, "confidence": confidence, "target_confidence": target,
+            "done_probability": done, "completion_probability": completion}
+
+
+@pytest.mark.parametrize("decision", [
+    check(done=0.3),                      # the operation head itself sees completion as possible
+    check(confidence=0.2),                # its chosen operation is below the floor
+    check(target=0.1),                    # its chosen target is below the target floor
+    check(operation="WAIT", target=None, done=0.2),
+])
+def test_a_confident_goal_check_may_finish_where_the_head_leaves_room(decision):
+    assert jev.goal_met(decision, 0.35, 0.2)
+
+
+@pytest.mark.parametrize("decision", [
+    check(operation="NEED_GUIDANCE", target=None, done=0.4),
+    check(operation="BLOCKED", target=None, done=0.4),
+    check(done=0.1),                      # a confident action with negligible support for DONE
+    check(done=0.4, completion=0.89),
+    check(done=0.4, completion=None),
+])
+def test_a_goal_check_never_overrides_a_stop_a_confident_action_or_an_unsure_check(decision):
+    assert not jev.goal_met(decision, 0.35, 0.2)
 
 
 @pytest.mark.parametrize("probability", [None, 0.5, 0.89, float("nan"), "0.99", 1.5])
@@ -209,15 +235,23 @@ def test_an_action_the_goal_still_requires_is_taken(monkeypatch, key, probabilit
     d = jev.choose(make_state(), "submit the form", [])
     assert d["choice"] == "e2" and d["operation"] == "CLICK" and d.get("goal_check") is None
     assert d["completion_probability"] == (probability if probability in (0.5, 0.89) else None)
+    assert not jev.goal_met(d, 0.35, 0.2)
 
 
 def test_done_contradicted_by_the_goal_check_continues_with_the_next_best_operation(monkeypatch, key):
-    probabilities = {"DONE": 0.6, "CLICK": 0.3, "WAIT": 0.1}
+    probabilities = {"DONE": 0.5, "CLICK": 0.45, "WAIT": 0.05}
     monkeypatch.setattr(jev, "post_json", goal_reply("DONE", 0.1, operation_probabilities=probabilities))
     d = jev.choose(make_state(), "submit the form", [])
-    # Renormalized without DONE: CLICK 0.75 of five remaining operations.
+    # Scored on its own probability: renormalizing would inflate a weak runner-up.
     assert d["choice"] == "e2" and d["operation"] == "CLICK" and d["goal_check"] == "unmet"
-    assert d["confidence"] == pytest.approx((0.75 - 0.2) / 0.8) and d["target_confidence"] == 0.9
+    assert d["confidence"] == 0.45 and d["target_confidence"] == 0.9
+
+
+def test_a_weak_runner_up_after_overruling_done_is_not_inflated(monkeypatch, key):
+    probabilities = {"DONE": 0.9, "CLICK": 0.05, "WAIT": 0.05}
+    monkeypatch.setattr(jev, "post_json", goal_reply("DONE", 0.1, operation_probabilities=probabilities))
+    d = jev.choose(make_state(), "submit the form", [])
+    assert d["goal_check"] == "unmet" and d["confidence"] == 0.05  # renormalized it scored 0.417
 
 
 def test_done_is_kept_when_the_goal_check_is_unsure(monkeypatch, key):

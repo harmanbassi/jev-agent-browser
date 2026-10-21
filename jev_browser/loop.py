@@ -10,7 +10,7 @@ between calls so a resumed goal knows what already happened.
 import time
 
 from .camofox import CamofoxError, StalePage, TabGone
-from .jev import ModelError, action_space, choose, field_context, field_text, verify_visual
+from .jev import ModelError, action_space, choose, field_context, field_text, goal_met, verify_visual
 from .policy import URLPolicy, action_block
 from .budget import Budget, BudgetExceeded, current, limits
 from .vision import VisionRun, VisionSettings, VisionUnavailable
@@ -162,6 +162,9 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                 else:
                     decision = choose(state, goal, history)
                 current.get().check()
+                if goal_met(decision, max(min_confidence, strict), max(min_target_confidence, strict)):
+                    decision = {**decision, "choice": "DONE", "operation": "DONE", "goal_check": "met",
+                                "confidence": 2 * decision["completion_probability"] - 1}  # Noul confidence |2p-1|
                 decisions.append(decision)
                 choice = decision["choice"]
                 if choice in {"DONE", "BLOCKED", "NEED_GUIDANCE"}:
@@ -196,8 +199,10 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                 ):
                     if escalate():
                         continue
+                    detail = {"detail": "The goal check contradicted DONE; no other operation cleared "
+                                        "the floor."} if decision.get("goal_check") == "unmet" else {}
                     return result("paused", "low_confidence", confidence=decision["confidence"],
-                                  target_confidence=target_confidence)
+                                  target_confidence=target_confidence, **detail)
                 action = next(a for a in state["actions"] if a["id"] == choice)
                 if reason := action_block(action):
                     return result("paused", reason)

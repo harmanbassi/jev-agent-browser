@@ -258,11 +258,11 @@ def test_long_text_and_element_tables_are_capped(monkeypatch):
 
 def test_results_report_the_last_goal_check(monkeypatch):
     page = FakePage([make_state()])
-    script(monkeypatch, [{**decision("DONE"), "completion_probability": 0.97, "goal_check": "met"}])
+    script(monkeypatch, [{**decision("DONE"), "completion_probability": 0.97}])
 
     out = loop.run_task(page, "goal")
 
-    assert out["status"] == "done" and out["completion_probability"] == 0.97 and out["done_by"] == "goal_check"
+    assert out["status"] == "done" and out["completion_probability"] == 0.97 and "done_by" not in out
 
 
 def test_duplicate_links_no_longer_split_the_target_below_the_floor(monkeypatch):
@@ -373,3 +373,32 @@ def test_tab_recovery_is_bounded_and_needs_an_owned_tab(monkeypatch, gone, owned
 
     assert out["status"] == "error" and "HTTP 410" in out["reason"]
     assert out.get("recoveries", 0) == (loop.MAX_RECOVERIES if owned else 0)
+
+
+def test_overruled_done_without_a_confident_alternative_says_why(monkeypatch):
+    page = FakePage([make_state()])
+    script(monkeypatch, [{**decision("e2", "CLICK", confidence=0.05), "goal_check": "unmet"}])
+
+    out = loop.run_task(page, "goal")
+
+    assert out["reason"] == "low_confidence" and "contradicted DONE" in out["detail"] and page.acted == []
+
+
+def test_a_confident_goal_check_finishes_where_the_head_leaves_room(monkeypatch):
+    page = FakePage([make_state()])
+    script(monkeypatch, [{**decision("e2", "CLICK", confidence=0.6, target_confidence=0.9),
+                          "completion_probability": 0.95, "done_probability": 0.3}])
+
+    out = loop.run_task(page, "open the comments")
+
+    assert out["status"] == "done" and out["done_by"] == "goal_check" and page.acted == []
+
+
+def test_a_confident_action_is_taken_despite_a_confident_goal_check(monkeypatch):
+    page = FakePage([make_state(marker="a"), make_state(marker="b")])
+    script(monkeypatch, [{**decision("e2", "CLICK", confidence=0.9, target_confidence=0.9),
+                          "completion_probability": 0.95, "done_probability": 0.05}, decision("DONE")])
+
+    out = loop.run_task(page, "submit the form")
+
+    assert page.acted == [("e2", None)] and out.get("done_by") is None

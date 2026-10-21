@@ -138,15 +138,19 @@ Every interface (Python, CLI, MCP, Hermes) returns the same result fields:
 | `done_by` | `goal_check` when that check (at least 0.9), not the operation choice, finished the task |
 
 Every decision also asks Jev, in the same request, whether the goal is already
-met. A confident yes finishes the task even when the operation head wanted to
-keep going; a confident no (at most 0.2) overrules a `DONE` choice, and the
-next-best operation must still clear the usual confidence floors. Goals that
-ask for an action (open, submit, send) are not met by a page that only offers it.
+met. A confident yes (at least 0.9) finishes the task where the operation head
+leaves room for it: the head gave `DONE` at least 0.15, or its chosen action is
+below its floor. It never overrides `NEED_GUIDANCE`, `BLOCKED` or a confident
+action. A confident no (at most 0.2) overrules a `DONE` choice; the next-best
+operation is scored on its own probability and must clear the usual floor, or
+the task pauses as `low_confidence` with a `detail`. Goals that ask for an action
+(open, submit, send) are not met by a page that only offers it.
 
-Duplicate links (the same label and the same `href`, such as a header and footer
-"Downloads") share their probability before the target confidence floor applies,
-and Jev acts on the first observed one. Controls without a shared destination,
-such as two buttons with the same text, are never pooled.
+Duplicate links (the same label and the same real `href`, such as a header and
+footer "Downloads") share their probability before the target confidence floor
+applies, and Jev acts on the copy it preferred. Script-handled links (`#...`,
+`javascript:`) and controls without a shared destination, such as an
+"Add to cart" button on every row, are never pooled.
 
 ## Optional visual browsing
 

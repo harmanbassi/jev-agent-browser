@@ -2,11 +2,14 @@
 
 ## Unreleased
 
-- Ask a goal check with every decision (same request): finish on a confident yes,
-  overrule an unsupported `DONE` on a confident no, and report
-  `completion_probability` / `done_by` in results.
+- Ask a goal check with every decision (same request). A confident yes finishes
+  only where the operation head leaves room (it gives `DONE` at least 0.15 or
+  its action is below the floor), never over `NEED_GUIDANCE`/`BLOCKED`. A
+  confident no overrules `DONE`, and the next-best operation is scored on its
+  own probability. Results report `completion_probability` / `done_by`.
 - Pool the probability of equivalent targets (same kind, role, normalized label,
-  value and `href`) before the target floor, so duplicate links no longer pause.
+  value and real `href`; never `#` or `javascript:` links) before the target
+  floor, acting on the copy Jev preferred, so duplicate links no longer pause.
 - Keep the strict 0.8 visual floors for `require_visual` runs only. Auto-escalated
   and `always` runs keep the text floors instead of pausing right after escalating.
 - With `JEV_VISION_BOX=1`, use per-operation box answers (asked in the same request,

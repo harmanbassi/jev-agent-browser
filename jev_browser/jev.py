@@ -26,6 +26,11 @@ CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 # to clear the usual confidence floors before anything executes.
 GOAL_MET = 0.9
 GOAL_UNMET = 0.2
+# The goal check may finish a task only where the operation head leaves room for it:
+# its chosen action is below the floor, or it gives DONE at least this probability.
+# In live runs an action head that is sure of a next step gave DONE 0.02-0.09, while
+# on pages that were already done it gave DONE 0.24-0.62; 0.15 separates the two.
+DONE_SUPPORT = 0.15
 # With JEV_VISION_BOX, the box breaks an uncertain target choice: below the floor,
 # or the runner-up class has at least TIE of the leader's probability. The box may
 # only pick one of the TOP_K most probable observed classes.
@@ -96,6 +101,18 @@ def validate_choice(answer, ids):
     if not valid:
         raise ModelError("Invalid Jev response; no action executed.")
     return answer
+
+
+def goal_met(decision, floor, target_floor):
+    """Whether a confident goal check may finish the task instead of the chosen operation.
+
+    Never over NEED_GUIDANCE/BLOCKED, and only where the operation head leaves room:
+    it gives DONE some support, or its chosen operation/target is below the floor.
+    """
+    completion, target = decision.get("completion_probability"), decision.get("target_confidence")
+    return (completion is not None and completion >= GOAL_MET and decision["operation"] not in STOPS
+            and (decision.get("done_probability", 0) >= DONE_SUPPORT or decision["confidence"] < floor
+                 or target is not None and target < target_floor))
 
 
 def choice_confidence(probabilities):
@@ -254,14 +271,13 @@ def choose(state, goal, history, *, frame=None, vision_run=None, target_floor=0.
     operation, confidence = operation_answer["choice"], operation_answer["confidence"]
     # An optional head: a missing or malformed goal check changes nothing.
     completion, goal_check = noul(answers.get("goal_satisfied")), None
-    if completion is not None and operation != "DONE" and completion >= GOAL_MET:
-        operation, confidence, goal_check = "DONE", 2 * completion - 1, "met"  # Noul confidence |2p-1|
-    elif completion is not None and operation == "DONE" and completion <= GOAL_UNMET:
-        rest = {k: p for k, p in operation_answer["probabilities"].items() if k != "DONE"}
-        total = sum(rest.values())
+    head = operation_answer["probabilities"]
+    if completion is not None and operation == "DONE" and completion <= GOAL_UNMET:
+        rest = {k: p for k, p in head.items() if k != "DONE"}
+        # Scored on its own probability: renormalizing without DONE would turn a 0.05
+        # runner-up into a confident choice. A weak one pauses as low_confidence.
         operation = max(rest, key=rest.get)
-        confidence = choice_confidence(p / total for p in rest.values()) if total else 0.0
-        goal_check = "unmet"
+        confidence, goal_check = rest[operation], "unmet"
     target_confidence = target_source = None
     if operation in targets:
         # Unused target heads cannot cause an action. Validate the head the operation selected.
@@ -291,6 +307,7 @@ def choose(state, goal, history, *, frame=None, vision_run=None, target_floor=0.
         "confidence": confidence,
         "target_confidence": target_confidence,
         "completion_probability": completion,
+        "done_probability": head.get("DONE", 0.0),
         "goal_check": goal_check,
         "target_source": target_source,
         "latency_ms": round((time.perf_counter() - started) * 1000),
