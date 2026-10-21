@@ -304,3 +304,16 @@ def test_a_required_visual_finish_passes_the_goal_check_to_verification(monkeypa
     seen = []
     monkeypatch.setattr(loop, "verify_visual", lambda *a, **k: seen.append(k) or True)
     assert run(page, require_visual=True)["status"] == "done" and seen == [{"goal_check": .96}]
+
+
+def test_visual_verification_never_counts_an_unconfirmed_action_as_evidence(monkeypatch):
+    seen = []
+    monkeypatch.setattr(jev, "post_json", lambda url, body, **k: seen.append(body) or {"answers": {"satisfied": {"noul": .99}}})
+    history = [{"action": "Code", "kind": "click", "text": None, "page_changed": True, "effect": "taken"},
+               {"action": "Submit", "kind": "click", "text": None, "page_changed": False, "effect": "uncertain"},
+               {"action": "Search", "kind": "fill", "text": "x", "page_changed": True}]
+    jev.verify_visual(frame(), "Open the menu", VisionRun(VisionSettings(enabled=True)), history)
+    evidence = seen[0]["state"][0]["executed_actions"]
+    assert [step["action"] for step in evidence] == ["Code", "Search"]
+    assert evidence[0]["effect"] == "taken"
+    assert "absent or ambiguous evidence does not" in seen[0]["questions"]["satisfied"]["instructions"]["question"].lower()

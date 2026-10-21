@@ -94,7 +94,9 @@ during verification. The Noul asks whether the image shows the goal's end state.
 It passes at 0.95, or at 0.8 when the deciding request's own goal check, asked
 about the same image, is at least 0.9. Measured on the same viewports, a visibly
 open dropdown scored 0.97 (goal check 0.96) and closed or wrong pages 0.01 (goal
-check 0.01-0.03); the previous wording scored them 0.67-0.72 and 0.47-0.65. These
+check 0.01-0.03); the previous wording scored them 0.67-0.72 and 0.47-0.65. Executed
+actions count as evidence only when their effect was confirmed: a click the browser
+abandoned without a visible result (`effect: uncertain`) is left out. These
 checks are conservative: video, animation and changing ads can cause safe pauses.
 They cannot make concurrent changes from unrelated clients atomic.
 
