@@ -78,8 +78,10 @@ image. Only enable this for pages you permit the provider to see. Page content
 remains untrusted. Masked evidence cannot prove a requirement inside a masked
 region. URL policy is checked before capture/upload, including redirects.
 
-Images are validated, bounded, resized to the model's limits and kept only for
-the current run. Results contain counts and resolved model IDs, never image
+Images are validated, bounded, resized to the model's limits (longest side at
+most 1568 px), uploaded as baseline JPEG (quality 85, as the provider recommends)
+and kept only for the current run. `vision.uploaded_bytes` reports the bytes sent.
+Freshness checks compare the captured pixels, never the lossy upload. Results contain counts and resolved model IDs, never image
 bytes. Jev does not save screenshots, cache them across profiles or put them in
 histories. The upstream provider's retention policy is separate.
 

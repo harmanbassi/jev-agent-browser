@@ -15,6 +15,9 @@ from .environment import get
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_REPLY_BYTES = 12 * 1024 * 1024
+# Uploads are baseline JPEG, as TypeSafe recommends: a PNG viewport of a photo-heavy
+# page reached 1.6 MB in testing. Freshness never compares these lossy bytes.
+JPEG_QUALITY = 85
 MODES = {"off", "auto", "always"}
 
 
@@ -114,6 +117,7 @@ class Frame:
     scale: float
     offset: tuple
     scale_y: float = 1.0
+    raw: bytes = b""  # the prepared RGB pixels; freshness compares these, never the JPEG
     received: float = field(default_factory=time.monotonic)
 
     def __repr__(self):
@@ -171,16 +175,16 @@ class Frame:
             canvas = Image.new("RGB", size, "black")
             canvas.paste(image, offset)
             data = io.BytesIO()
-            canvas.save(data, format="PNG")
+            canvas.save(data, format="JPEG", quality=JPEG_QUALITY)
             return cls(state, safe, capture_id, data.getvalue(), size, (width, height),
-                       scaled[0] / width, offset, scaled[1] / height)
+                       scaled[0] / width, offset, scaled[1] / height, canvas.tobytes())
         except VisionUnavailable:
             raise
         except (KeyError, TypeError, ValueError, OSError, struct.error, binascii.Error):
             raise VisionUnavailable("vision_invalid_observation") from None
 
     def image_part(self):
-        return {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(self.pixels).decode()}}
+        return {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(self.pixels).decode()}}
 
     def rect(self, action):
         r = action["rect"]
@@ -191,7 +195,7 @@ class Frame:
         if self.source_size != other.source_size or time.monotonic() - self.received > 30:
             return False
         if action is None:
-            return hashlib.sha256(self.pixels).digest() == hashlib.sha256(other.pixels).digest()
+            return hashlib.sha256(self.raw).digest() == hashlib.sha256(other.raw).digest()
         r = self.rect(action)
         if not all(type(v) in (int, float) and math.isfinite(v) for v in r.values()):
             return False
@@ -200,8 +204,8 @@ class Frame:
         if box[0] >= box[2] or box[1] >= box[3]:
             return False
         Image = dependencies()
-        with Image.open(io.BytesIO(self.pixels)) as before, Image.open(io.BytesIO(other.pixels)) as after:
-            return before.crop(box).tobytes() == after.crop(box).tobytes()
+        before, after = (Image.frombytes("RGB", f.size, f.raw) for f in (self, other))
+        return before.crop(box).tobytes() == after.crop(box).tobytes()
 
 
 def box_target(answer, presence, frame, candidates):

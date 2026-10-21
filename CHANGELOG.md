@@ -12,6 +12,8 @@
 - With `JEV_VISION_BOX=1`, use per-operation box answers (asked in the same request,
   with the goal and operation) to break uncertain or split target choices among
   the three most probable observed controls, instead of only ever pausing.
+- Upload viewport images as baseline JPEG (quality 85) instead of PNG; pixel
+  freshness checks compare the captured pixels, not the encoded upload.
 - Update the browser image's MCP TypeScript SDK pin to 1.32.1 so fresh builds
   pass the current dependency security audit.
 
