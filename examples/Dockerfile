@@ -7,7 +7,7 @@ WORKDIR /app
 RUN npm pkg set overrides.adm-zip=0.6.1 overrides.brace-expansion=5.0.12 \
         overrides.fast-uri=3.1.8 overrides.hono=4.13.13 overrides.ip-address=10.7.4 \
         overrides.js-yaml=4.3.2 overrides.qs=6.16.1 \
-    && npm install --omit=dev --ignore-scripts --save-exact playwright-core@1.59.1 proxy-addr@2.0.8 @modelcontextprotocol/sdk@1.31.0 \
+    && npm install --omit=dev --ignore-scripts --save-exact playwright-core@1.59.1 proxy-addr@2.0.8 @modelcontextprotocol/sdk@1.32.1 \
     && npm audit --omit=dev --audit-level=high \
     && npm cache clean --force
 COPY camofox_plugin/jev_vision/ /app/plugins/jev_vision/
