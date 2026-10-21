@@ -91,6 +91,12 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
             return True
         return False
 
+    def landed(url):
+        # Where the last action led, recorded only once that page passed the guard.
+        # Separate names: Jev read a bare "url" as the page an action led to.
+        if steps and "url_after" not in steps[-1]:
+            steps[-1]["url_after"] = url
+
     def result(status, reason=None, **extra):
         out = {"status": status}
         if reason:
@@ -132,6 +138,7 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                     if guard and (blocked := guard(state["url"])):
                         return result("error", blocked)  # uncleared: its text goes nowhere
                     cleared = state
+                    landed(state["url"])
                 recent = steps[-3:]
                 if len(recent) == 3 and all(s["kind"] != "wait" for s in recent) and (
                     all(s["page_changed"] is False for s in recent)
@@ -149,6 +156,7 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                 if using_vision:
                     frame = capture()
                     state = cleared = frame.state
+                    landed(state["url"])
                     decision = choose(state, goal, history, frame=frame, vision_run=visual,
                                       target_floor=max(min_target_confidence, strict))
                 else:
@@ -214,7 +222,7 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                         or not page.recover(cleared["url"], guard)):
                     return result("error", str(gone))
                 recoveries += 1
-                step = {"action": "Reopened the page in a new tab", "kind": "recover", "url": cleared["url"],
+                step = {"action": "Reopened the page in a new tab", "kind": "recover", "from_url": cleared["url"],
                         "text": None, "page_changed": True}
                 steps.append(step)
                 history.append(step)
@@ -230,7 +238,7 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
             step = {
                 "action": action["label"],
                 "kind": action["kind"],
-                "url": state["url"],  # lets Jev see it already visited a page
+                "from_url": state["url"],  # with url_after, lets Jev see where it has been
                 "text": text,
                 "confidence": round(decision["confidence"], 3),
                 "target_confidence": target_confidence and round(target_confidence, 3),

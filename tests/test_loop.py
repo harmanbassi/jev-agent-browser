@@ -279,13 +279,23 @@ def test_duplicate_links_no_longer_split_the_target_below_the_floor(monkeypatch)
     assert page.acted == [("e1", None)] and out["reason"] == "step_budget"
 
 
-def test_each_step_records_the_page_it_was_taken_on(monkeypatch):
+def test_each_step_records_the_page_it_ran_on_and_the_page_it_led_to(monkeypatch):
     page = FakePage([make_state(url="https://a.test/", marker="a"), make_state(url="https://a.test/item", marker="b")])
     seen = script(monkeypatch, [decision("e2", "CLICK"), decision("DONE")])
 
     out = loop.run_task(page, "goal")
 
-    assert out["steps"][0]["url"] == "https://a.test/" and seen[1][0]["url"] == "https://a.test/"
+    assert out["steps"][0]["from_url"] == "https://a.test/" and out["steps"][0]["url_after"] == "https://a.test/item"
+    assert seen[1][0]["from_url"] == "https://a.test/" and seen[1][0]["url_after"] == "https://a.test/item"
+
+
+def test_a_blocked_destination_is_never_recorded_in_steps(monkeypatch):
+    page = FakePage([make_state(marker="a"), make_state(url="http://10.0.0.1/admin", marker="b")])
+    script(monkeypatch, [decision("e2", "CLICK")])
+
+    out = loop.run_task(page, "goal", guard=lambda url: "Blocked" if "10.0.0.1" in url else None)
+
+    assert out["status"] == "error" and "10.0.0.1" not in str(out)
 
 
 SCROLL = [{"id": "scroll_down", "kind": "scroll", "label": "Scroll down", "delta": 560}]
@@ -350,7 +360,7 @@ def test_a_destroyed_tab_is_reopened_once_and_the_task_continues(monkeypatch):
     out = loop.run_task(page, "goal")
 
     assert out["status"] == "done" and out["recoveries"] == 1 and page.reopened == [("https://a.test/form", None)]
-    assert out["steps"][0]["kind"] == "recover" and out["steps"][0]["url"] == "https://a.test/form"
+    assert out["steps"][0]["kind"] == "recover" and out["steps"][0]["from_url"] == "https://a.test/form"
     assert page.acted == [("e2", None)]
 
 

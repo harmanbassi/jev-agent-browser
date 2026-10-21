@@ -14,8 +14,8 @@
   the three most probable observed controls, instead of only ever pausing.
 - Upload viewport images as baseline JPEG (quality 85) instead of PNG; pixel
   freshness checks compare the captured pixels, not the encoded upload.
-- Record the page URL in each step and send it with Jev's recent actions, so a
-  run can tell it already visited a page instead of navigating back and forth.
+- Record `from_url` and `url_after` in each step and send them with Jev's recent
+  actions, so a run can tell where it has already been.
 - Do not flag repeated scrolling as `no_progress` while each scroll changes the
   page; `max_steps` still bounds an endless feed.
 - Report provider token usage (and cost where reported) per task in results,

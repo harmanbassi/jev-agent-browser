@@ -187,9 +187,11 @@ class Browser:
             except StalePage:
                 return error(OBSERVE_AGAIN)
             step = {"action": target["label"] if target else value, "kind": target["kind"] if target else "press",
-                    "url": state["url"], "text": SUPERVISOR_TEXT if text is not None else None}
+                    "from_url": state["url"], "text": SUPERVISOR_TEXT if text is not None else None}
             out = self._observe(session_id, session)
             step["page_changed"] = out.get("changed")
+            if out["status"] == "ready":
+                step["url_after"] = out["url"]
             session.history = (session.history + [step])[-10:]
             return out
         except (CamofoxError, StalePage, ValueError) as e:
