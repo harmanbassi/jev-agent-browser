@@ -254,3 +254,182 @@ def test_long_text_and_element_tables_are_capped(monkeypatch):
     out = loop.run_task(page, "goal")
 
     assert len(out["text"]) == loop.TEXT_LIMIT and len(out["elements"]) == loop.ELEMENT_LIMIT
+
+
+def test_results_report_the_last_goal_check(monkeypatch):
+    page = FakePage([make_state()])
+    script(monkeypatch, [{**decision("DONE"), "completion_probability": 0.97}])
+
+    out = loop.run_task(page, "goal")
+
+    assert out["status"] == "done" and out["completion_probability"] == 0.97 and "done_by" not in out
+
+
+def test_duplicate_links_no_longer_split_the_target_below_the_floor(monkeypatch):
+    from test_jev import duplicates, split_reply
+    from jev_browser import jev
+    before = duplicates(("Comments", "item?id=1", "link"), ("Hide", "hide?id=1", "link"),
+                        ("Comments", "item?id=1", "link"))
+    page = FakePage([before, make_state(marker="after")])
+    monkeypatch.setenv("JEV_OPENROUTER_KEY", "test-key")
+    monkeypatch.setattr(jev, "post_json", split_reply({"1": 0.45, "2": 0.1, "3": 0.45}, "1"))
+
+    out = loop.run_task(page, "open the comments", max_steps=1)
+
+    assert page.acted == [("e1", None)] and out["reason"] == "step_budget"
+
+
+def test_each_step_records_the_page_it_ran_on_and_the_page_it_led_to(monkeypatch):
+    page = FakePage([make_state(url="https://a.test/", marker="a"), make_state(url="https://a.test/item", marker="b")])
+    seen = script(monkeypatch, [decision("e2", "CLICK"), decision("DONE")])
+
+    out = loop.run_task(page, "goal")
+
+    assert out["steps"][0]["from_url"] == "https://a.test/" and out["steps"][0]["url_after"] == "https://a.test/item"
+    assert seen[1][0]["from_url"] == "https://a.test/" and seen[1][0]["url_after"] == "https://a.test/item"
+
+
+def test_a_blocked_destination_is_never_recorded_in_steps(monkeypatch):
+    page = FakePage([make_state(marker="a"), make_state(url="http://10.0.0.1/admin", marker="b")])
+    script(monkeypatch, [decision("e2", "CLICK")])
+
+    out = loop.run_task(page, "goal", guard=lambda url: "Blocked" if "10.0.0.1" in url else None)
+
+    assert out["status"] == "error" and "10.0.0.1" not in str(out)
+
+
+SCROLL = [{"id": "scroll_down", "kind": "scroll", "label": "Scroll down", "delta": 560}]
+
+
+def test_scrolling_through_a_changing_page_is_progress(monkeypatch):
+    page = FakePage([make_state(marker=str(i), text=f"section {i}", actions=SCROLL) for i in range(6)])
+    script(monkeypatch, [decision("scroll_down", "SCROLL")] * 4 + [decision("DONE")])
+
+    out = loop.run_task(page, "scroll to the references")
+
+    assert out["status"] == "done" and len(out["steps"]) == 4
+
+
+def test_scrolling_without_change_or_past_the_step_budget_still_pauses(monkeypatch):
+    page = FakePage([make_state(actions=SCROLL)])
+    script(monkeypatch, [decision("scroll_down", "SCROLL")] * 3)
+    assert loop.run_task(page, "goal")["reason"] == "no_progress"
+
+    endless = FakePage([make_state(marker=str(i), text=f"feed {i}", actions=SCROLL) for i in range(30)])
+    script(monkeypatch, [decision("scroll_down", "SCROLL")] * 30)
+    out = loop.run_task(endless, "goal", max_steps=12)
+    assert out["reason"] == "step_budget" and len(out["steps"]) == 12
+
+
+def test_results_report_token_usage_next_to_call_counts(monkeypatch):
+    from jev_browser.budget import current
+    page = FakePage([make_state()])
+
+    def choose(state, goal, history):
+        current.get().record("typesafe/jev-1.13", {"input_tokens": 900, "output_tokens": 40})
+        return decision("DONE")
+
+    monkeypatch.setattr(loop, "choose", choose)
+    out = loop.run_task(page, "goal")
+
+    assert out["usage"] == {"input_tokens": 900, "output_tokens": 40,
+                            "by_model": {"typesafe/jev-1.13": {"input_tokens": 900, "output_tokens": 40}}}
+
+
+class Recoverable(FakePage):
+    """The browser destroys the tab during a freshness read, an action, or the read after it."""
+
+    def __init__(self, states, gone=1, owned=True, during="fresh"):
+        super().__init__(states)
+        self.gone, self.owned, self.during, self.reopened, self.observed = gone, owned, during, [], 0
+
+    def lose(self, phase):
+        from jev_browser.camofox import TabGone
+        if self.during == phase and self.gone:
+            self.gone -= 1
+            raise TabGone(f"Camofox /tabs/t/{phase} returned HTTP 410")
+
+    def fresh(self, page, action=None):
+        self.lose("fresh")
+        return True
+
+    def observe(self):
+        self.observed += 1
+        if self.observed > 1:  # the read after an action
+            self.lose("observe")
+        return super().observe()
+
+    def act(self, action, page, text=None):
+        self.lose("act")
+        super().act(action, page, text)
+
+    def recover(self, url, guard):
+        self.reopened.append((url, guard("https://a.test/form")))
+        return self.owned
+
+
+def test_a_tab_destroyed_during_a_read_reopens_the_latest_page_and_continues(monkeypatch):
+    page = Recoverable([make_state(url="https://a.test/form", marker="a"),
+                        make_state(url="https://a.test/sent", marker="b")])
+    script(monkeypatch, [decision("e2", "CLICK"), decision("DONE")])
+
+    out = loop.run_task(page, "goal")
+
+    assert out["status"] == "done" and out["recoveries"] == 1
+    assert page.reopened == [("https://a.test/sent", None)]  # never the form page the click left
+    assert [s["kind"] for s in out["steps"]] == ["click", "recover"] and page.acted == [("e2", None)]
+
+
+@pytest.mark.parametrize("during", ["act", "observe"])
+def test_a_tab_destroyed_during_or_right_after_an_action_is_never_retried(monkeypatch, during):
+    # The click may have submitted the form before the tab died: reopening and
+    # deciding again could submit it twice.
+    page = Recoverable([make_state(url="https://a.test/form", marker="a")], during=during)
+    script(monkeypatch, [decision("e2", "CLICK"), decision("e2", "CLICK")])
+
+    out = loop.run_task(page, "submit the form")
+
+    assert out["status"] == "paused" and out["reason"] == "tab_lost" and out["url"] == "https://a.test/form"
+    assert page.reopened == [] and "recoveries" not in out and "text" not in out
+    assert out["steps"][-1]["action"] == "Go" and out["steps"][-1]["tab_lost"] is True
+    assert len(out["steps"]) == 1
+
+
+@pytest.mark.parametrize("gone, owned", [(9, True), (1, False)])
+def test_tab_recovery_is_bounded_and_needs_an_owned_tab(monkeypatch, gone, owned):
+    page = Recoverable([make_state(marker=str(i)) for i in range(9)], gone=gone, owned=owned)
+    script(monkeypatch, [decision("e2", "CLICK")] * 9)
+
+    out = loop.run_task(page, "goal")
+
+    assert out["status"] == "error" and "HTTP 410" in out["reason"]
+    assert out.get("recoveries", 0) == (loop.MAX_RECOVERIES if owned else 0)
+
+
+def test_overruled_done_without_a_confident_alternative_says_why(monkeypatch):
+    page = FakePage([make_state()])
+    script(monkeypatch, [{**decision("e2", "CLICK", confidence=0.05), "goal_check": "unmet"}])
+
+    out = loop.run_task(page, "goal")
+
+    assert out["reason"] == "low_confidence" and "contradicted DONE" in out["detail"] and page.acted == []
+
+
+def test_a_confident_goal_check_finishes_where_the_head_leaves_room(monkeypatch):
+    page = FakePage([make_state()])
+    script(monkeypatch, [{**decision("e2", "CLICK", confidence=0.6, target_confidence=0.9),
+                          "completion_probability": 0.95, "done_probability": 0.3}])
+
+    out = loop.run_task(page, "open the comments")
+
+    assert out["status"] == "done" and out["done_by"] == "goal_check" and page.acted == []
+
+
+def test_a_confident_action_is_taken_despite_a_confident_goal_check(monkeypatch):
+    page = FakePage([make_state(marker="a"), make_state(marker="b")])
+    script(monkeypatch, [{**decision("e2", "CLICK", confidence=0.9, target_confidence=0.9),
+                          "completion_probability": 0.95, "done_probability": 0.05}, decision("DONE")])
+
+    out = loop.run_task(page, "submit the form")
+
+    assert page.acted == [("e2", None)] and out.get("done_by") is None

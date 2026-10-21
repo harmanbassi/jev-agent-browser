@@ -7,6 +7,9 @@
   };
   for (const [id,e] of cache.nodes) if (!e.isConnected) cache.nodes.delete(id);
   const safe = e => !['password','file','hidden'].includes(e.type);
+  const sensitive = e => ['email','tel'].includes(e.type) ||
+    (e.getAttribute('autocomplete')||'').toLowerCase().split(/\s+/).some(token=>
+      /^(cc-|current-password$|new-password$|one-time-code$|email$|tel)/.test(token));
   const visible = e => !e.closest('[aria-hidden="true"],[inert]') &&
     e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true});
   const name = (e,seen=new Set()) => {
@@ -62,10 +65,8 @@
     // dialogs otherwise leave covered links visible to Jev but impossible to click.
     if (!e.contains(document.elementFromPoint(x,y))) continue;
     if (rname==='gridcell' && e.querySelector('button,[role="button"]')) continue;
-    const sensitive=['email','tel'].includes(e.type) ||
-      (e.getAttribute('autocomplete')||'').toLowerCase().split(/\s+/).some(token=>
-        /^(cc-|current-password$|new-password$|one-time-code$|email$|tel)/.test(token));
-    const base={node:identity(e),role:rname,label:name(e)||rname,...(sensitive?{sensitive:true}:{}),
+    const secret=sensitive(e);
+    const base={node:identity(e),role:rname,label:name(e)||rname,...(secret?{sensitive:true}:{}),
       rect:{x:r.x,y:r.y,w:r.width,h:r.height}};
     for (const key of ['checked','selected','expanded']) {
       const value=e.getAttribute('aria-'+key);
@@ -73,7 +74,7 @@
     }
     if (['checkbox','radio'].includes(e.type)) base.checked=String(e.checked);
     if (e.tagName==='SELECT') {
-      if (sensitive) {
+      if (secret) {
         actions.push({...base,kind:'click',value:''});
         continue; // Do not disclose personal/payment option values to the model.
       }
@@ -84,17 +85,26 @@
       const editable=!e.readOnly && e.getAttribute('aria-readonly')!=='true' &&
         (['textbox','searchbox','spinbutton'].includes(rname) ||
           (rname==='combobox' && ['INPUT','TEXTAREA'].includes(e.tagName)));
-      const value=sensitive ? '' : 'value' in e ? String(e.value) :
+      const value=secret ? '' : 'value' in e ? String(e.value) :
         e.isContentEditable || rname==='combobox' ? e.innerText.trim() : '';
       actions.push({...base,kind:editable?'fill':'click',value});
       if (editable) actions.push({...base,kind:'click',value,label:'Open '+base.label});
     }
   }
-  const words=[], walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
+  const words=[], walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT);
   const range=document.createRange(); let node,length=0;
   while ((node=walker.nextNode()) && length<6000) {
+    if (node.nodeType===1) {
+      // Code views keep their text in a textarea's value, which has no text nodes to read.
+      if (node.tagName!=='TEXTAREA' || sensitive(node) || !visible(node)) continue;
+      const value=node.value.trim(), r=node.getBoundingClientRect();
+      if (value && r.bottom>0 && r.top<innerHeight && r.right>0 && r.left<innerWidth) {
+        words.push(value.slice(0,6000-length)); length+=value.length;
+      }
+      continue;
+    }
     const value=node.textContent.trim(), parent=node.parentElement;
-    if (!value || !parent || parent.closest('script,style,noscript,template') || !visible(parent)) continue;
+    if (!value || !parent || parent.closest('script,style,noscript,template,textarea') || !visible(parent)) continue;
     range.selectNodeContents(node); const r=range.getBoundingClientRect();
     if (r.width>0 && r.height>0 && r.bottom>0 && r.top<innerHeight && r.right>0 && r.left<innerWidth) {
       words.push(value); length+=value.length;

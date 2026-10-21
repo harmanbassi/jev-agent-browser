@@ -12,13 +12,31 @@ import time
 
 import requests
 
-from .questions import NEXT_ACTION, TARGET, TEXT_VALUE
-from .budget import request_timeout
+from .questions import GOAL_CHECK, NEXT_ACTION, TARGET, TEXT_VALUE
+from .budget import current, request_timeout
 from .config import endpoint, flag, placeholder_key
 from .environment import get
 
 DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
 CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+# The goal check is a Noul: a calibrated probability that the goal is already met.
+# A false yes hands an unfinished task back as done, so overriding the operation
+# head needs a strong yes (0.9, TypeSafe's own example for a costly false yes).
+# Overruling DONE needs only a clear no; the next-best operation then still has
+# to clear the usual confidence floors before anything executes.
+GOAL_MET = 0.9
+GOAL_UNMET = 0.2
+# The goal check may finish a task only where the operation head leaves room for it:
+# its chosen action is below the floor, or it gives DONE at least this probability.
+# In live runs an action head that is sure of a next step gave DONE 0.02-0.09, while
+# on pages that were already done it gave DONE 0.24-0.62; 0.15 separates the two.
+DONE_SUPPORT = 0.15
+# With JEV_VISION_BOX, the box breaks an uncertain target choice: below the floor,
+# or the runner-up class has at least TIE of the leader's probability. The box may
+# only pick one of the TOP_K most probable observed classes.
+TIE = 0.5
+TOP_K = 3
+GUARD_HREF = 14  # position of the href attribute in snapshot.js's cache.guard tuple
 _HTTP = requests.Session()
 _HTTP.max_redirects = 0  # Never forward a provider key via a redirect.
 
@@ -58,9 +76,12 @@ def post_json(url, body, *, frame=None, vision_run=None):
         if response.status_code >= 400:
             raise ModelError(f"Model provider returned HTTP {response.status_code}; no action executed.")
         try:
-            return response.json()
+            result = response.json()
         except ValueError:
             raise ModelError("Model provider returned a non-JSON reply; no action executed.") from None
+        if isinstance(result, dict) and (budget := current.get()):
+            budget.record(result.get("model") or body.get("model"), result.get("usage"))
+        return result
     raise ModelError("Model unavailable; no action executed.")
 
 
@@ -80,6 +101,54 @@ def validate_choice(answer, ids):
     if not valid:
         raise ModelError("Invalid Jev response; no action executed.")
     return answer
+
+
+def goal_met(decision, floor, target_floor):
+    """Whether a confident goal check may finish the task instead of the chosen operation.
+
+    Never over NEED_GUIDANCE/BLOCKED, and only where the operation head leaves room:
+    it gives DONE some support, or its chosen operation/target is below the floor.
+    """
+    completion, target = decision.get("completion_probability"), decision.get("target_confidence")
+    return (completion is not None and completion >= GOAL_MET and decision["operation"] not in STOPS
+            and (decision.get("done_probability", 0) >= DONE_SUPPORT or decision["confidence"] < floor
+                 or target is not None and target < target_floor))
+
+
+def choice_confidence(probabilities):
+    """TypeSafe's Choice confidence: how far the top probability sits above an even split."""
+    probabilities = list(probabilities)
+    n = len(probabilities)
+    return 1.0 if n < 2 else (max(probabilities) - 1 / n) / (1 - 1 / n)
+
+
+def noul(answer):
+    """A valid Noul probability, or None."""
+    value = answer.get("noul") if isinstance(answer, dict) else None
+    return value if type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1 else None
+
+
+def equivalent(candidates, probabilities, guards):
+    """Target indices grouped into equivalence classes, most probable class first.
+
+    Duplicate controls (a story title and its "comments" link, a header and footer
+    "Downloads") split Jev's probability between them. Only targets with the same
+    kind, role, normalized label, value AND real destination are pooled; without
+    one (most buttons and fields, "#" and javascript: links) nothing merges.
+    Ties keep observation order.
+    """
+    classes = {}
+    for index, action in candidates.items():
+        guard = guards.get(str(action.get("node")))
+        href = guard[GUARD_HREF] if isinstance(guard, list) and len(guard) > GUARD_HREF else None
+        key = index
+        # "#" and javascript: links are script-handled: one per row ("Add to cart"), not one place.
+        if isinstance(href, str) and (href := href.strip()) and not href.startswith("#") \
+                and not href.lower().startswith("javascript:"):
+            key = (action["kind"], action.get("role"), " ".join(action["label"].split()).casefold(),
+                   action.get("value"), href)
+        classes.setdefault(key, []).append(index)
+    return sorted(classes.values(), key=lambda c: -sum(probabilities[i] for i in c))
 
 
 def action_space(actions):
@@ -122,7 +191,8 @@ STOPS = {
 }
 
 
-def choose(state, goal, history, *, frame=None, vision_run=None):
+def choose(state, goal, history, *, frame=None, vision_run=None, target_floor=0.0):
+    guards = state.get("guards") or {}
     if frame is not None:
         state = frame.safe
     elements, targets, controls = action_space(state["actions"])
@@ -135,7 +205,8 @@ def choose(state, goal, history, *, frame=None, vision_run=None):
     operations.update({key: value["label"] for key, value in controls.items()})
     operations.update(STOPS)
     questions = {
-        "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": NEXT_ACTION}}
+        "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": NEXT_ACTION}},
+        "goal_satisfied": {"type": "noul", "instructions": {"goal": goal, "question": GOAL_CHECK}},
     }
     for operation, candidates in targets.items():
         questions[operation.lower() + "_target"] = {
@@ -157,7 +228,8 @@ def choose(state, goal, history, *, frame=None, vision_run=None):
             "page": {k: state[k] for k in ("url", "title", "text")},
             "elements": elements,
             "recent_actions": [
-                {k: h.get(k) for k in ("action", "kind", "text", "page_changed")} for h in history[-10:]
+                {k: h.get(k) for k in ("action", "kind", "text", "page_changed", "from_url", "url_after")}
+                for h in history[-10:]
             ],
         },
         "questions": questions,
@@ -177,10 +249,16 @@ def choose(state, goal, history, *, frame=None, vision_run=None):
         body["model"] = vision_run.settings.model
         body["state"] = [body["state"], frame.image_part()]
         if vision_run.settings.box:
-            questions["target_present"] = {"type": "noul", "instructions":
-                {"goal": goal, "question": "Is the next interactive target visibly present?"}}
-            questions["target_box"] = {"type": "box", "instructions":
-                {"goal": goal, "question": "Locate the next interactive target in the image."}}
+            # One pair per operation, in the same request: the box is only read for
+            # the operation chosen, and only to break an uncertain target choice.
+            for operation in targets:
+                name = operation.lower()
+                questions[name + "_present"] = {"type": "noul", "instructions": {
+                    "goal": goal, "operation": operation,
+                    "question": "Is the element this operation should act on next visibly present in the image?"}}
+                questions[name + "_box"] = {"type": "box", "instructions": {
+                    "goal": goal, "operation": operation,
+                    "question": "Locate the element this operation should act on next in the image."}}
     started = time.perf_counter()
     result = (post_json(get("JEV_URL", DECISIONS_URL), body, frame=frame, vision_run=vision_run)
               if frame is not None else post_json(get("JEV_URL", DECISIONS_URL), body))
@@ -190,24 +268,48 @@ def choose(state, goal, history, *, frame=None, vision_run=None):
     if not isinstance(answers, dict):
         raise ModelError("Jev response had no answers; no action executed.")
     operation_answer = validate_choice(answers.get("operation", {}), operations)
-    operation = operation_answer["choice"]
-    target_confidence = None
+    operation, confidence = operation_answer["choice"], operation_answer["confidence"]
+    # An optional head: a missing or malformed goal check changes nothing.
+    completion, goal_check = noul(answers.get("goal_satisfied")), None
+    head = operation_answer["probabilities"]
+    if completion is not None and operation == "DONE" and completion <= GOAL_UNMET:
+        rest = {k: p for k, p in head.items() if k != "DONE"}
+        # Scored on its own probability: renormalizing without DONE would turn a 0.05
+        # runner-up into a confident choice. A weak one pauses as low_confidence.
+        operation = max(rest, key=rest.get)
+        confidence, goal_check = rest[operation], "unmet"
+    target_confidence = target_source = None
     if operation in targets:
         # Unused target heads cannot cause an action. Validate the head the operation selected.
         target_answer = validate_choice(answers.get(operation.lower() + "_target", {}), targets[operation])
-        choice = targets[operation][target_answer["choice"]]["id"]
-        target_confidence = target_answer["confidence"]
-        if frame is not None and vision_run.settings.box:
-            from .vision import validate_box
-            validate_box(answers.get("target_box", {}), answers.get("target_present", {}), frame,
-                         targets[operation][target_answer["choice"]])
+        index, target_confidence = target_answer["choice"], target_answer["confidence"]
+        classes = equivalent(targets[operation], target_answer["probabilities"], guards)
+        if len(classes) < len(targets[operation]):
+            probabilities = target_answer["probabilities"]
+            index = max(classes[0], key=lambda i: target_answer["probabilities"][i])  # Jev's preferred member
+            target_confidence = choice_confidence(sum(target_answer["probabilities"][i] for i in c) for c in classes)
+        probabilities = target_answer["probabilities"]
+        mass = [sum(probabilities[i] for i in c) for c in classes]
+        if (frame is not None and vision_run.settings.box
+                and (target_confidence < target_floor or len(mass) > 1 and mass[1] >= TIE * mass[0])):
+            from .vision import box_target
+            shortlist = [targets[operation][i] for c in classes[:TOP_K] for i in c]
+            name = operation.lower()
+            picked = box_target(answers.get(name + "_box", {}), answers.get(name + "_present", {}), frame, shortlist)
+            index = next(i for i, a in targets[operation].items() if a is picked)
+            target_source = "box"
+        choice = targets[operation][index]["id"]
     else:
         choice = controls[operation]["id"] if operation in controls else operation
     return {
         "choice": choice,
         "operation": operation,
-        "confidence": operation_answer["confidence"],
+        "confidence": confidence,
         "target_confidence": target_confidence,
+        "completion_probability": completion,
+        "done_probability": head.get("DONE", 0.0),
+        "goal_check": goal_check,
+        "target_source": target_source,
         "latency_ms": round((time.perf_counter() - started) * 1000),
         "usage": result.get("usage", {}),
         "model": result.get("model", body["model"]),

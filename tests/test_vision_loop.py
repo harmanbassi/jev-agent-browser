@@ -112,7 +112,7 @@ def test_visual_model_receives_safe_metadata_and_pixels(monkeypatch):
         assert body["state"][0]["elements"][0]["image_rectangle"]["x"] == 10
         return {"model": "typesafe/jev-1.14-20261014", "answers": {
             "operation": answer("CLICK", ops, .99), "click_target": answer("1", targets, .99),
-            "target_present": {"noul": .99}, "target_box": {
+            "click_present": {"noul": .99}, "click_box": {
                 "box": {"top": .03, "bottom": .1, "left": .03, "right": .1}, "confidence": .99}}}
     monkeypatch.setattr(jev, "post_json", post)
     out = jev.choose(f.state, "red", [], frame=f, vision_run=run_state)
@@ -180,3 +180,92 @@ def test_verification_receives_executed_history_and_records_probability(monkeypa
     assert jev.verify_visual(frame(), 'Choose red', visual, history)
     assert seen[0]['state'][0]['executed_actions'] == history
     assert visual.summary()['completion_probability'] == .99
+
+
+@pytest.mark.parametrize("mode", ["auto", "always"])
+def test_only_required_visual_runs_use_the_strict_floors(monkeypatch, mode):
+    page = VisualPage([frame()])
+    escalation = [decision("BLOCKED")] if mode == "auto" else []
+    decisions = iter([*escalation, decision("e1", "CLICK", confidence=.6, target_confidence=.5),
+                      decision("DONE", confidence=.6)])
+    monkeypatch.setattr(loop, "choose", lambda *a, **k: next(decisions))
+    monkeypatch.setattr(loop, "verify_visual", lambda *a: True)
+    out = run(page, vision=mode)
+    assert out["status"] == "done" and page.acted == [("e1", None)]
+    assert out["vision"]["escalations"] == (1 if mode == "auto" else 0) and out["vision"]["verified"]
+
+
+def two_buttons():
+    """Two equally labelled buttons the DOM cannot tell apart; only pixels can."""
+    f = frame()
+    second = {**f.state["actions"][0], "id": "e2", "node": 2, "rect": {"x": 300, "y": 300, "w": 100, "h": 100}}
+    f.state["actions"] = [f.state["actions"][0], second]
+    f.state["guards"] = {"1": ["g1"], "2": ["g2"]}
+    f.safe = {**f.safe, "actions": list(f.state["actions"])}
+    return f
+
+
+def box_reply(target_probabilities, box, presence=.99, box_confidence=.95):
+    def post(url, body, **kwargs):
+        post.bodies.append(body)
+        ops = body["questions"]["operation"]["criteria"]
+        n = len(target_probabilities)
+        target = {"choice": max(target_probabilities, key=target_probabilities.get),
+                  "probabilities": target_probabilities,
+                  "confidence": (max(target_probabilities.values()) - 1 / n) / (1 - 1 / n)}
+        return {"model": "typesafe/jev-1.14", "answers": {
+            "operation": answer("CLICK", ops, .99), "click_target": target,
+            "click_present": {"noul": presence}, "click_box": {"box": box, "confidence": box_confidence}}}
+    post.bodies = []
+    return post
+
+
+SECOND = {"top": .4, "bottom": .5, "left": .28, "right": .34}   # centre inside button 2
+NOWHERE = {"top": .9, "bottom": .95, "left": .9, "right": .95}
+
+
+def box_choose(monkeypatch, reply, floor=.8):
+    monkeypatch.setattr(jev, "post_json", reply)
+    f = two_buttons()
+    return jev.choose(f.state, "Choose the red button", [], frame=f,
+                      vision_run=VisionRun(VisionSettings(enabled=True, box=True)), target_floor=floor)
+
+
+def test_box_breaks_a_split_between_observed_targets(monkeypatch):
+    reply = box_reply({"1": .5, "2": .5}, SECOND)
+    d = box_choose(monkeypatch, reply)
+    assert d["choice"] == "e2" and d["target_source"] == "box"
+    box = reply.bodies[0]["questions"]["click_box"]
+    assert box["type"] == "box" and box["instructions"]["operation"] == "CLICK"
+    assert box["instructions"]["goal"] == "Choose the red button"
+
+
+@pytest.mark.parametrize("box, presence, confidence", [(NOWHERE, .99, .95), (SECOND, .5, .95), (SECOND, .99, .3)])
+def test_an_unresolved_split_still_pauses(monkeypatch, box, presence, confidence):
+    with pytest.raises(VisionUnavailable, match="vision_target_ambiguous"):
+        box_choose(monkeypatch, box_reply({"1": .5, "2": .5}, box, presence, confidence))
+
+
+def test_a_box_over_overlapping_controls_still_pauses(monkeypatch):
+    reply = box_reply({"1": .5, "2": .5, "3": 0.0}, SECOND)
+    monkeypatch.setattr(jev, "post_json", reply)
+    f = two_buttons()
+    f.safe["actions"].append({**f.state["actions"][1], "id": "e3", "node": 3, "label": "Overlay"})
+    with pytest.raises(VisionUnavailable, match="vision_target_ambiguous"):
+        jev.choose(f.state, "red", [], frame=f, vision_run=VisionRun(VisionSettings(enabled=True, box=True)),
+                   target_floor=.8)
+
+
+def test_a_confident_target_is_not_vetoed_by_the_box(monkeypatch):
+    d = box_choose(monkeypatch, box_reply({"1": .97, "2": .03}, SECOND))
+    assert d["choice"] == "e1" and d.get("target_source") is None
+
+
+def test_a_box_resolved_target_acts_below_the_target_floor(monkeypatch):
+    page = VisualPage([frame()])
+    decisions = iter([{**decision("e1", "CLICK", target_confidence=.1), "target_source": "box"},
+                      decision("DONE")])
+    monkeypatch.setattr(loop, "choose", lambda *a, **k: next(decisions))
+    monkeypatch.setattr(loop, "verify_visual", lambda *a: True)
+    out = run(page, require_visual=True)
+    assert out["status"] == "done" and page.acted == [("e1", None)]

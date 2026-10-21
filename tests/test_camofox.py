@@ -351,3 +351,38 @@ def test_page_scripts_are_valid_javascript(tmp_path, name):
     path = tmp_path / f"{name}.js"
     path.write_text(source)
     subprocess.run(["node", "--check", str(path)], check=True, capture_output=True)
+
+
+@pytest.mark.parametrize("code", ["tab_timeout", "tab_destroyed", "browser_restarted"])
+def test_a_destroyed_tab_is_reported_as_gone(stub, code):
+    stub.replies = [(410, {"error": "Tab was destroyed. Open a new tab.", "code": code})]
+    with pytest.raises(camofox.TabGone, match="HTTP 410"):
+        Camofox(stub.url, "u", "t").click("[data-jev-target]")
+
+
+def test_reopen_replaces_the_tab_in_the_same_identity(stub):
+    stub.replies = [(200, {"tabId": "t1"}), (200, {"tabId": "t2"})]
+    cf = Camofox.open(stub.url, "own", "session-1", "https://a.test/")
+    page = Page(cf)
+    page.sized, page.after_input = True, {"kind": "click"}
+    assert page.recover("https://a.test/form", lambda url: None)
+    assert cf.tab_id == "t2" and not page.sized and page.after_input is None
+    assert stub.requests[1][1:3] == ("/tabs", {"userId": "own", "sessionKey": "session-1", "url": "https://a.test/form"})
+    with pytest.raises(CamofoxError, match="Blocked"):
+        page.recover("http://10.0.0.1/", lambda url: "Blocked: private")
+    assert len(stub.requests) == 2 and cf.tab_id == "t2"
+
+
+def test_a_tab_this_client_did_not_open_is_not_reopened(stub):
+    assert Page(Camofox(stub.url, "shared", "their-tab")).recover("https://a.test/", lambda url: None) is False
+    assert stub.requests == []
+
+
+def test_a_supervisor_key_press_needs_a_fresh_page_and_settles_before_the_next_read():
+    cf, state = FakeCamofox(), make_state()
+    page = Page(cf)
+    page.press("ArrowDown", state)
+    page.observe()
+    assert cf.calls[0] == ("press", "ArrowDown") and ("settle",) in cf.calls
+    with pytest.raises(StalePage):
+        Page(FakeCamofox(fresh=False)).press("Enter", state)

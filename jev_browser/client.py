@@ -6,11 +6,34 @@ import time
 import uuid
 
 from .budget import limits
-from .camofox import Camofox, CamofoxError, Page
+from .camofox import Camofox, CamofoxError, Page, StalePage
 from .config import Settings
-from .jev import api_key
+from .jev import action_space, api_key
 from .loop import run_task
 from .vision import VisionSettings
+
+# The supervisor path: an agent acts itself on observed element ids when Jev pauses.
+# Values it types are never recorded in history, so they never reach the model.
+SUPERVISOR_TEXT = "(entered by the supervising agent)"
+OPERATIONS = {"click": "CLICK", "type": "TYPE_TEXT", "select": "SELECT"}
+KEYS = {"Enter", "Tab", "Escape", "Backspace", "Space", "ArrowDown", "ArrowUp", "ArrowLeft",
+        "ArrowRight", "Home", "End", "PageDown", "PageUp"}
+OBSERVE_AGAIN = "The page changed since it was observed; call browser_snapshot and retry with current ids."
+FALLBACKS = {
+    "sensitive_action": "Jev never enters sensitive values or presses sign-in/payment controls. If the user "
+                        "supplied the value and approved this step, do it yourself with browser_snapshot and "
+                        "browser_act, then continue with browser_task.",
+    "missing_value": "The goal does not supply this field's value. Ask the user, or type the value they gave "
+                     "with browser_act, then continue with browser_task.",
+    "tab_lost": "The browser closed the tab while the last step ran; it may already have taken effect (for "
+                "example a submitted form). Check the result before repeating it: browser_task reopens the "
+                "latest page in this session, or open the reported url in a new session.",
+}
+CONTINUE = "Continue with browser_task (no new information needed) within a fresh budget."
+BUDGETS = {"step_budget", "model_budget", "timeout", "vision_budget", "vision_capture_budget", "cancelled"}
+INSPECT = ("Inspect the page with browser_snapshot. Give browser_task a clearer or smaller goal, or do the "
+           "unclear step yourself with browser_act (for example ArrowDown then Enter in an autocomplete), "
+           "then continue with browser_task.")
 
 
 def error(message):
@@ -27,6 +50,7 @@ class Session:
     cancel: threading.Event = field(default_factory=threading.Event)
     touched: float = field(default_factory=time.monotonic)
     require_visual: bool = False
+    observed: dict | None = None  # the observation a supervisor's element ids refer to
 
 
 class Browser:
@@ -111,9 +135,13 @@ class Browser:
             visual_options = {}
             if vision is not None or required:
                 visual_options = {"vision": vision, "require_visual": required}
+            session.observed = None
             out = run_task(session.page, goal, history=session.history, max_steps=max_steps,
                            max_model_calls=max_model_calls, timeout=timeout, cancel=session.cancel,
                            guard=self.settings.policy, **visual_options)
+            if out.get("status") == "paused":
+                reason = out.get("reason")
+                out["fallback"] = FALLBACKS.get(reason) or (CONTINUE if reason in BUDGETS else INSPECT)
             session.history = (session.history + out.get("steps", []))[-10:]
             session.result = {**out, "session_id": session_id}
             return session.result
@@ -122,6 +150,105 @@ class Browser:
             session.lock.release()
             if self._closed:
                 self.close(session_id)
+
+    def snapshot(self, session_id):
+        """The current page and its element ids for a supervising agent; no model call."""
+        session, failed = self._claim(session_id)
+        if failed:
+            return failed
+        try:
+            return self._observe(session_id, session, text=True)
+        except (CamofoxError, StalePage, ValueError) as e:
+            return error(str(e))
+        finally:
+            session.touched = time.monotonic()
+            session.lock.release()
+
+    def act(self, session_id, element_id, action, value=None):
+        """Do one step for Jev on an element id from the latest snapshot/act result.
+
+        The same executor checks as Jev's actions apply: the observation must still be
+        current and the target must still be the observed, visible, uncovered control.
+        Sensitive fields are allowed here: this is the supervisor's explicit path.
+        """
+        session, failed = self._claim(session_id)
+        if failed:
+            return failed
+        try:
+            state = session.observed
+            if state is None:
+                return error("Call browser_snapshot first; element ids refer to its observation.")
+            target, text = self._target(state, element_id, action, value)
+            if isinstance(target, str):
+                return error(target)
+            session.observed = None  # ids are single-use: the page is about to change
+            try:
+                if action == "press":
+                    session.page.press(value, state)
+                else:
+                    session.page.act(target, state, text=text)
+            except StalePage:
+                return error(OBSERVE_AGAIN)
+            step = {"action": target["label"] if target else value, "kind": target["kind"] if target else "press",
+                    "from_url": state["url"], "text": SUPERVISOR_TEXT if text is not None else None}
+            out = self._observe(session_id, session)
+            step["page_changed"] = out.get("changed")
+            if out["status"] == "ready":
+                step["url_after"] = out["url"]
+            session.history = (session.history + [step])[-10:]
+            return out
+        except (CamofoxError, StalePage, ValueError) as e:
+            return error(str(e))
+        finally:
+            session.touched = time.monotonic()
+            session.lock.release()
+
+    def _claim(self, session_id):
+        with self._lock:
+            session = self._get(session_id)
+            if session is None:
+                return None, error("Unknown or expired session")
+            if not session.lock.acquire(blocking=False):
+                return None, error("Session is busy; wait for the task or cancel it first")
+        return session, None
+
+    def _observe(self, session_id, session, text=False):
+        previous = session.observed
+        state = session.page.observe()
+        if blocked := self.settings.policy(state["url"]):
+            return error(blocked)  # this page's content goes nowhere
+        session.observed = state
+        out = {"status": "ready", "session_id": session_id, "url": state["url"], "title": state["title"]}
+        if text:
+            out["text"] = state["text"]
+        else:
+            out["changed"] = previous is None or previous.get("fingerprint") != state.get("fingerprint")
+        out["elements"] = action_space(state["actions"])[0]
+        return out
+
+    @staticmethod
+    def _target(state, element_id, action, value):
+        """(observed action, text to type) or an error message. Never a selector or script."""
+        if action == "press":
+            return None if value in KEYS else f"press needs one of: {', '.join(sorted(KEYS))}", None
+        if action == "scroll":
+            target = next((a for a in state["actions"] if a["id"] == f"scroll_{value}"), None)
+            return target or "scroll needs value up or down, where the page can scroll that way", None
+        if action not in OPERATIONS:
+            return "action must be click, type, select, press or scroll", None
+        targets = action_space(state["actions"])[1].get(OPERATIONS[action], {})
+        if action == "select":
+            target = next((a for index, a in targets.items() if index.split(":")[0] == element_id
+                           and value in (a["value"], a["label"].split(" → ", 1)[-1])), None)
+            return target or f"Element {element_id} has no option {value!r}", None
+        target = targets.get(element_id) if isinstance(element_id, str) else None
+        if target is None:
+            return f"Element {element_id} cannot be used with {action}; use an id from the latest snapshot", None
+        if action == "type":
+            if not isinstance(value, str) or not value or len(value) > 2000:
+                return "type needs a value of 1 to 2000 characters", None
+            return target, value
+        return target, None
 
     def inspect(self, session_id):
         session = self._get(session_id)

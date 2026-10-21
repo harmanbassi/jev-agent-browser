@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+- Ask a goal check with every decision (same request). A confident yes finishes
+  only where the operation head leaves room (it gives `DONE` at least 0.15 or
+  its action is below the floor), never over `NEED_GUIDANCE`/`BLOCKED`. A
+  confident no overrules `DONE`, and the next-best operation is scored on its
+  own probability. Results report `completion_probability` / `done_by`.
+- Pool the probability of equivalent targets (same kind, role, normalized label,
+  value and real `href`; never `#` or `javascript:` links) before the target
+  floor, acting on the copy Jev preferred, so duplicate links no longer pause.
+- Keep the strict 0.8 visual floors for `require_visual` runs only. Auto-escalated
+  and `always` runs keep the text floors instead of pausing right after escalating.
+- With `JEV_VISION_BOX=1`, use per-operation box answers (asked in the same request,
+  with the goal and operation) to break uncertain or split target choices among
+  the three most probable observed controls, instead of only ever pausing.
+- Upload viewport images as baseline JPEG (quality 85) instead of PNG; pixel
+  freshness checks compare the captured pixels, not the encoded upload.
+- Record `from_url` and `url_after` in each step and send them with Jev's recent
+  actions, so a run can tell where it has already been.
+- Do not flag repeated scrolling as `no_progress` while each scroll changes the
+  page; `max_steps` still bounds an endless feed.
+- Report provider token usage (and cost where reported) per task in results,
+  totalled and per model, for Python, CLI, MCP and Hermes.
+- Supervisor fallback on the same session: MCP `browser_snapshot` / `browser_act`
+  and Python `Browser.snapshot` / `Browser.act` act on observed element ids
+  through the executor's freshness and target checks (click, type, select,
+  allowlisted keys, scroll). Paused results name the applicable `fallback`;
+  the Hermes pause guidance points to its own manual tools and continuing.
+- Observations include the text of non-sensitive text areas, so code views
+  (for example a hosted file's contents) reach Jev. This changes `snapshot.js`:
+  rebuild the browser image so the masked-observation plugin matches.
+- Browser image: bound Camofox 1.18.1's DOM-click fallback (a temporary patch
+  that fails the build if the base differs; `CAMOFOX_CLICK_PATCH=0` skips it for
+  older bases), so a click on a target re-rendered after tagging returns 422
+  within seconds instead of hanging 30 s and destroying the tab (HTTP 410).
+  Rebuild the browser image to apply it.
+- After an HTTP 410 during a read, clients that opened their own tab reopen the
+  latest page in the same identity (at most twice per task) and report
+  `recoveries`. A 410 during or right after an action pauses as `tab_lost`
+  without retrying, since the action may already have taken effect.
 - Update the browser image's MCP TypeScript SDK pin to 1.32.1 so fresh builds
   pass the current dependency security audit.
 

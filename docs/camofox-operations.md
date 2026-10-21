@@ -28,6 +28,27 @@ scripts, preserving the base's Firefox and native SQLite build. It audits the
 result and fails on remaining high/critical npm findings. Repeat scans when
 updating the base; this is not an exhaustive OS/browser security scan.
 
+`examples/Dockerfile` also carries a temporary patch to Camofox 1.18.1's
+`/click` route (`examples/camofox-click-timeout.mjs`). Its DOM-click fallback
+called `locator.evaluate()` without a timeout. When a page re-renders the target
+after it was tagged (a download page swapping in a platform-specific button, an
+autocomplete list re-rendering), that call waited Playwright's 30-second default,
+the route's whole budget, and the server destroyed the tab with HTTP 410. The
+patch bounds it like the adjacent `boundingBox()` call, so the route fails within
+about 12 seconds with its existing 422 and the client observes the page again;
+the tab and its form state survive. The patch step fails the build if the base's
+code differs, so review it whenever the base image changes and drop it once
+upstream bounds that call. To build an older `CAMOFOX_BASE_IMAGE` whose code
+differs, pass `--build-arg CAMOFOX_CLICK_PATCH=0`; that image keeps the 30-second
+click hang and its HTTP 410s.
+
+Clients that opened their own tab also recover from a 410 during a read, when no
+action was in flight: they reopen the most recently observed page in the same
+identity (cookies survive, the URL policy is checked again), at most twice per
+task, and report `recoveries`. A 410 during an action, or during the read right
+after it, pauses as `tab_lost` instead: the action may already have taken effect
+(a submitted form whose response was slow), so it is never retried automatically.
+
 ## Upgrade an existing service
 
 Record the existing image, configuration, mounts, port mappings, authentication,

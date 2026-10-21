@@ -17,9 +17,9 @@ from helpers import make_state
 from test_camofox import stub
 
 
-def wire(size=(1120, 780), color="red"):
+def wire(size=(1120, 780), color="red", image=None):
     stream = io.BytesIO()
-    Image.new("RGB", size, color).save(stream, "PNG")
+    (image or Image.new("RGB", size, color)).save(stream, "PNG")
     state = make_state(actions=[{"id": "e1", "kind": "click", "node": 1, "label": "Choose", "role": "button",
                                  "rect": {"x": 10, "y": 10, "w": 200, "h": 200}}])
     state.update(w=size[0], h=size[1])
@@ -85,7 +85,9 @@ def test_images_fit_limits_and_coordinates_round_trip(size, expected):
     assert f.size == expected
     assert "pixels" not in repr(f) and "data:image" not in repr(f)
     part = f.image_part()
-    assert part["image_url"]["url"].startswith("data:image/png;base64,")
+    assert part["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    with Image.open(io.BytesIO(f.pixels)) as sent:
+        assert sent.format == "JPEG" and not sent.info.get("progressive") and sent.size == expected
     rect = f.rect(f.safe["actions"][0])
     assert rect["x"] == 10 * f.scale + f.offset[0]
 
@@ -143,17 +145,19 @@ def test_box_requires_presence_valid_edges_and_unique_observed_target():
     f = frame()
     action = f.safe["actions"][0]
     box = {"box": {"top": 0.03, "bottom": 0.1, "left": 0.03, "right": 0.1}, "confidence": 0.9}
-    vision.validate_box(box, {"noul": 0.99}, f, action)
+    assert vision.box_target(box, {"noul": 0.99}, f, [action]) is action
     for bad in [dict(box, confidence=0.1), dict(box, box={**box["box"], "left": -1}),
                 dict(box, box={**box["box"], "right": math.nan}), {},
                 dict(box, box={**box["box"], "top": 0.9})]:
         with pytest.raises(vision.VisionUnavailable):
-            vision.validate_box(bad, {"noul": 0.99}, f, action)
+            vision.box_target(bad, {"noul": 0.99}, f, [action])
     with pytest.raises(vision.VisionUnavailable):
-        vision.validate_box(box, {"noul": 0.2}, f, action)
+        vision.box_target(box, {"noul": 0.2}, f, [action])
+    with pytest.raises(vision.VisionUnavailable):  # an observed control outside the shortlist
+        vision.box_target(box, {"noul": 0.99}, f, [{**action, "node": 9}])
     f.safe["actions"].append({**action, "node": 2})
     with pytest.raises(vision.VisionUnavailable):
-        vision.validate_box(box, {"noul": 0.99}, f, action)
+        vision.box_target(box, {"noul": 0.99}, f, [action])
 
 
 def test_masked_transport_is_bounded_and_never_falls_back_to_raw_screenshot(stub):
@@ -182,3 +186,23 @@ def test_masked_transport_is_bounded_and_never_falls_back_to_raw_screenshot(stub
     stub.replies = [(200, value)]
     with pytest.raises(StalePage):
         Page(cf).observe_vision("https://other.test/", run)
+
+
+def test_uploads_are_baseline_jpeg_and_smaller_than_png():
+    noisy = Image.effect_noise((1120, 780), 64).convert("RGB")
+    png = io.BytesIO()
+    noisy.save(png, "PNG")
+    f = vision.Frame.decode(wire(image=noisy), "hash")
+    run = vision.VisionRun(vision.VisionSettings(enabled=True))
+    run.request(f)
+    assert f.pixels[:2] == b"\xff\xd8" and run.summary()["uploaded_bytes"] == len(f.pixels) < len(png.getvalue())
+
+
+def test_target_freshness_compares_captured_pixels_not_encoded_bytes():
+    # A change just outside the target shares its JPEG block; only raw pixels are compared.
+    changed = Image.new("RGB", (1120, 780), "red")
+    for y in range(780):
+        changed.putpixel((212, y), (0, 0, 255))
+    before, after = frame(), vision.Frame.decode(wire(image=changed), "hash")
+    action = before.safe["actions"][0]
+    assert before.unchanged(after, action) and not before.unchanged(after)

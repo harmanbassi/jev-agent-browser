@@ -28,6 +28,13 @@ class FakeBrowser:
     def inspect(self, sid):
         return {"status": "paused", "session_id": sid}
 
+    def snapshot(self, sid):
+        return {"status": "ready", "session_id": sid, "elements": []}
+
+    def act(self, sid, element_id, action, value=None):
+        self.calls.append(("act", sid, element_id, action, value))
+        return {"status": "ready", "session_id": sid, "changed": True}
+
     def cancel(self, sid):
         self.finished.set()
         return {"status": "cancelling"}
@@ -101,10 +108,14 @@ def test_mcp_tools_share_browser_and_return_structured_results():
 
     async def exercise():
         names = {t.name for t in await server.list_tools()}
-        assert names == {"browser_open", "browser_task", "browser_inspect", "browser_cancel", "browser_close"}
+        assert names == {"browser_open", "browser_task", "browser_inspect", "browser_cancel", "browser_close",
+                         "browser_snapshot", "browser_act"}
         for name, args, expected in [
             ("browser_open", {"url": "https://a.test"}, "ready"),
             ("browser_task", {"session_id": "s1", "goal": "g"}, "done"),
+            ("browser_snapshot", {"session_id": "s1"}, "ready"),
+            ("browser_act", {"session_id": "s1", "element_id": "3", "action": "type", "value": "x"}, "ready"),
+            ("browser_act", {"session_id": "s1", "action": "press", "value": "Enter"}, "ready"),
             ("browser_inspect", {"session_id": "s1"}, "paused"),
             ("browser_cancel", {"session_id": "s1"}, "cancelling"),
             ("browser_close", {"session_id": "s1"}, "closed"),
@@ -113,6 +124,7 @@ def test_mcp_tools_share_browser_and_return_structured_results():
             assert not result.is_error and result.structured_content["status"] == expected
 
     asyncio.run(exercise())
+    assert ("act", "s1", "3", "type", "x") in b.calls and ("act", "s1", None, "press", "Enter") in b.calls
 
 
 def test_mcp_cancellation_reaches_worker():
@@ -153,7 +165,7 @@ def test_real_mcp_stdio_handshake_and_tools(tmp_path):
             async with ClientSession(read, write) as session:
                 info = await session.initialize()
                 assert info.server_info.name == "jev-browser"
-                assert len((await session.list_tools()).tools) == 5
+                assert len((await session.list_tools()).tools) == 7
                 out = await session.call_tool("browser_inspect", {"session_id": "unknown"})
                 assert out.structured_content["status"] == "error"
 
@@ -189,3 +201,14 @@ def test_mcp_forwards_visual_controls_and_advertises_requirement():
         assert result.structured_content['status'] == 'paused'
     asyncio.run(exercise())
     assert seen[0]['vision'] == 'always' and seen[0]['require_visual']
+
+
+def test_browser_act_does_not_overstate_what_stays_from_the_model():
+    pytest.importorskip("mcp")
+    from jev_browser.mcp_server import create_server
+
+    async def describe():
+        return next(t for t in await create_server(FakeBrowser()).list_tools() if t.name == "browser_act").description
+
+    text = " ".join(asyncio.run(describe()).split())
+    assert "never sent" not in text and "by this call" in text and "later observations" in text

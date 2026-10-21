@@ -103,8 +103,14 @@ Tool flow:
 
 1. `browser_open(url)` returns an isolated `session_id`.
 2. `browser_task(session_id, goal)` runs or continues a task.
-3. On `paused`, inspect `reason`, `text`, and `elements`, then provide a clearer
-   goal. `sensitive_action` requires handling outside this tool, not blind retries.
+3. On `paused`, read `reason`, `fallback`, `text` and `elements`. Either give
+   `browser_task` a clearer goal, or do the step yourself: `browser_snapshot`
+   returns the page text and element ids, and `browser_act(session_id, action,
+   element_id?, value?)` clicks, types, selects, presses a key (Enter, Tab,
+   Escape, arrows...) or scrolls on those ids, then `browser_task` continues the
+   same session. `sensitive_action` (for example a phone field) is never retried
+   by Jev; enter such values with `browser_act` only when the user supplied them
+   and approved the step. See [SECURITY.md](SECURITY.md) for this path's limits.
 4. `browser_inspect` retrieves the last result/running state; `browser_cancel`
    requests cancellation. `browser_close` destroys the owned context and attempts
    saved-state removal (legacy authentication failures return a warning). If busy,
@@ -112,6 +118,39 @@ Tool flow:
 
 Sessions are process-local, capped at 16, and expire after 15 idle minutes when
 next accessed or a new session is opened. Server shutdown attempts cleanup.
+
+### Task results
+
+Every interface (Python, CLI, MCP, Hermes) returns the same result fields:
+
+| Field | Meaning |
+| --- | --- |
+| `status` | `done`, `paused` (with `reason`) or `error` |
+| `url`, `title`, `text` | The last page read, when it passed the URL policy |
+| `elements` | On `paused`: the observed controls Jev could act on |
+| `fallback` | On `paused` (Python/MCP): what the supervising agent should do next |
+| `steps` | Executed actions with `from_url` (the page they ran on), `url_after` (where they led, once that page passed the URL policy), their confidences and `page_changed` |
+| `jev_calls`, `model_requests` | Decisions made; model HTTP requests including retries/helpers |
+| `recoveries` | Tabs the browser destroyed during a read that were reopened on the latest page (at most 2), also listed in `steps`. A tab lost during an action pauses as `tab_lost` instead, because the action may have taken effect |
+| `usage` | Reported `input_tokens`/`output_tokens` (and `cost` where the provider reports it) for the task, totalled and `by_model` |
+| `vision` | With vision allowed: image calls, captures, `uploaded_bytes`, escalations, verification |
+| `completion_probability` | The last decision's goal check: probability the goal is already met |
+| `done_by` | `goal_check` when that check (at least 0.9), not the operation choice, finished the task |
+
+Every decision also asks Jev, in the same request, whether the goal is already
+met. A confident yes (at least 0.9) finishes the task where the operation head
+leaves room for it: the head gave `DONE` at least 0.15, or its chosen action is
+below its floor. It never overrides `NEED_GUIDANCE`, `BLOCKED` or a confident
+action. A confident no (at most 0.2) overrules a `DONE` choice; the next-best
+operation is scored on its own probability and must clear the usual floor, or
+the task pauses as `low_confidence` with a `detail`. Goals that ask for an action
+(open, submit, send) are not met by a page that only offers it.
+
+Duplicate links (the same label and the same real `href`, such as a header and
+footer "Downloads") share their probability before the target confidence floor
+applies, and Jev acts on the copy it preferred. Script-handled links (`#...`,
+`javascript:`) and controls without a shared destination, such as an
+"Add to cart" button on every row, are never pooled.
 
 ## Optional visual browsing
 
@@ -213,6 +252,9 @@ with Browser() as browser:
         result = browser.run(result["session_id"], "Read the visible heading")
     print(result)
 ```
+
+`browser.snapshot(session_id)` and `browser.act(session_id, element_id, action,
+value=None)` are the MCP `browser_snapshot`/`browser_act` supervisor tools.
 
 The lower-level `Camofox`, `Page`, and `run_task` interfaces remain available for
 custom drivers. `run_task` defaults to the public-page URL policy. Supply an

@@ -20,3 +20,36 @@ def test_jev_input_plugin_node_suite(name, tmp_path):
     out = subprocess.run(["node", "--test", str(plugin / "index.test.mjs")], capture_output=True, text=True)
     assert out.returncode == 0, out.stdout + out.stderr
     assert "# fail 0" in out.stdout
+
+
+CLICK_FALLBACK = """      const dispatchDomClick = async (locator) => {
+        await locator.evaluate((element) => {
+          if (!(element instanceof HTMLElement)) throw new Error('Element is not an HTMLElement');
+          element.click();
+        });
+        log('info', 'DOM click dispatched after Playwright click failure');
+      };
+"""
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
+def test_image_bounds_the_dom_click_fallback_or_fails_the_build(tmp_path):
+    patch = PLUGIN.parents[1] / "examples/camofox-click-timeout.mjs"
+    server = tmp_path / "server.js"
+    server.write_text("const before = 1;\n" + CLICK_FALLBACK)
+    out = subprocess.run(["node", str(patch), str(server)], capture_output=True, text=True)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "}, undefined, { timeout: Math.max(500, Math.min(3000, remainingBudget())) });" in server.read_text()
+    for changed in (server.read_text(), CLICK_FALLBACK * 2, "unrelated"):  # already patched, ambiguous, absent
+        server.write_text(changed)
+        out = subprocess.run(["node", str(patch), str(server)], capture_output=True, text=True)
+        assert out.returncode != 0 and "not found exactly once" in out.stderr
+
+
+def test_dockerfile_applies_the_click_patch_and_the_build_context_includes_it():
+    repo = PLUGIN.parents[1]
+    dockerfile = (repo / "examples/Dockerfile").read_text()
+    assert "ARG CAMOFOX_CLICK_PATCH=1" in dockerfile.split("FROM ", 1)[1]  # in scope after FROM
+    assert 'if [ "$CAMOFOX_CLICK_PATCH" = "1" ]; then node /tmp/camofox-click-timeout.mjs /app/server.js; fi' in dockerfile
+    assert "CAMOFOX_CLICK_PATCH=0" in (repo / "docs/camofox-operations.md").read_text()
+    assert "!examples/camofox-click-timeout.mjs" in (repo / ".dockerignore").read_text().splitlines()

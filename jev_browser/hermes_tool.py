@@ -67,7 +67,8 @@ SCHEMA = {
         "which dates, what counts as done), confirm it with them first.\n"
         "status 'paused' means it needs you: read `reason` and `elements`, look with browser_vision "
         "or browser_snapshot if needed, then call browser_task again (no url) with a clearer or "
-        "smaller goal, do the step yourself with browser_click/browser_type, or ask the user. "
+        "smaller goal, or do the step yourself with browser_click/browser_type/browser_press and "
+        "call browser_task again (no url) to continue, or ask the user. "
         "Use the browser_* tools directly for iframes, file uploads, pop-up windows and logins. "
         "Never use it to sign in, pay, or enter personal details."
     ),
@@ -103,8 +104,12 @@ NEXT = {
     ),
     "paused": (
         "Jev handed control back. Resolve `reason`: call browser_task again without url and a clearer "
-        "or smaller goal, act yourself with browser_click/browser_type on this same page "
-        "(browser_vision shows it), or ask the user."
+        "or smaller goal, or do the one step yourself on this same page (browser_snapshot for refs, "
+        "browser_vision to look; browser_click/browser_type, browser_press for keys such as ArrowDown "
+        "then Enter in an autocomplete) and then call browser_task again without url to continue. "
+        "On sensitive_action, enter the value yourself only if the user supplied it and approved the "
+        "step; otherwise ask the user. On tab_lost, the browser closed the tab mid-step and the step "
+        "may already have taken effect: check before repeating it."
     ),
     "error": "Retry once; if it fails again, fall back to browser_navigate/browser_snapshot/browser_click.",
 }

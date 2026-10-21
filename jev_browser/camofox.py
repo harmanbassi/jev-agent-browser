@@ -100,6 +100,10 @@ class CamofoxAuthError(CamofoxError):
     """The browser rejected credentials or denied a protected operation."""
 
 
+class TabGone(CamofoxError):
+    """The server destroyed the tab (HTTP 410); its browser identity and cookies survive."""
+
+
 class Camofox:
     """REST client bound to one Camofox tab."""
 
@@ -109,6 +113,7 @@ class Camofox:
         self.tab_id = tab_id
         self.headers = headers or {}
         self.timeout = timeout
+        self.session_key = None  # set when this client created the tab
         # Lean /jev-click is opt-in (JEV_FAST_CLICK=1) until it matches the core click on
         # animated widgets: measured 2026-09-30, Google Flights' trip-type menu toggled
         # shut because the snapshot beat its opening animation.
@@ -124,7 +129,13 @@ class Camofox:
         if not isinstance(reply, dict) or not isinstance(reply.get("tabId"), str) or not reply["tabId"]:
             raise CamofoxError("Camofox create-tab reply had no tabId")
         client.tab_id = reply["tabId"]
+        client.session_key = session_key
         return client
+
+    def reopen(self, url, *, guard=None):
+        """Replace a tab the server destroyed with a new one on `url`, in the same identity."""
+        self.tab_id = type(self).open(self.base, self.user_id, self.session_key, url, self.headers,
+                                      guard=guard).tab_id
 
     def _request(self, method, path, *, request_timeout=None, reply_limit=None, **body):
         wait = self.timeout if request_timeout is None else request_timeout
@@ -152,6 +163,8 @@ class Camofox:
             raise CamofoxError("Camofox control endpoint redirected; configure its final URL explicitly")
         if response.status_code in {409, 422}:
             raise StalePage(f"{path}: page changed (HTTP {response.status_code})")
+        if response.status_code == 410:
+            raise TabGone(f"Camofox {path} returned HTTP 410 (tab destroyed)")
         if response.status_code in {401, 403}:
             raise CamofoxAuthError(
                 f"Camofox rejected browser authentication or permission (HTTP {response.status_code}); "
@@ -312,7 +325,7 @@ class Page:
             reply = self.cf._request("post", f"/tabs/{self.cf.tab_id}/jev-observation",
                                      expectedUrl=expected_url, snapshotHash=hashlib.sha256(READ_STATE.encode()).hexdigest(),
                                      request_timeout=10, reply_limit=MAX_REPLY_BYTES)
-        except CamofoxAuthError:
+        except (CamofoxAuthError, TabGone):
             raise
         except CamofoxError as e:
             reason = "vision_capture_unavailable" if "HTTP 404" in str(e) else "vision_capture_failed"
@@ -334,6 +347,22 @@ class Page:
             )
             return current == [page["page_key"], page["guards"].get(str(node))]
         return self.cf.evaluate(MARKER) == page["marker"]
+
+    def recover(self, url, guard):
+        """Reopen `url` in a new tab after the server destroyed ours. Only for tabs this
+        client opened: a shared tab belongs to whoever manages it."""
+        if not self.cf.session_key:
+            return False
+        self.cf.reopen(url, guard=guard)
+        self.sized, self.after_input = False, None
+        return True
+
+    def press(self, key, page):
+        """A key on whatever holds focus, if the page is still the one observed."""
+        if not self.fresh(page):
+            raise StalePage("Page changed since this decision. Observe again.")
+        self.cf.press(key)
+        self.after_input = {"kind": "press"}  # let a highlighted option settle before the next read
 
     def act(self, action, page, text=None):
         if not self.fresh(page, action):
