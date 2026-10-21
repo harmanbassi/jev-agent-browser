@@ -186,11 +186,14 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                             if escalate():
                                 continue
                             return result("paused", "low_confidence", confidence=decision["confidence"])
-                        if using_vision:
+                        # Only a visual requirement needs visual proof; an escalation only helped
+                        # choose actions, so the text DONE rules and goal check apply.
+                        if visual.required:
                             fresh = capture()
                             if not frame.unchanged(fresh) or state["fingerprint"] != fresh.state["fingerprint"]:
                                 raise StalePage("Visual completion changed.")
-                            if not verify_visual(fresh, goal, visual, history):
+                            if not verify_visual(fresh, goal, visual, history,
+                                                 goal_check=decision.get("completion_probability")):
                                 return result("paused", "vision_completion_unverified")
                             verified_frame = capture()
                             if (not fresh.unchanged(verified_frame)

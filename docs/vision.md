@@ -43,8 +43,9 @@ ordinary text tasks escalate once on uncertain/blocked/no-progress decisions.
 After escalation, images remain required for the rest of that run. Only
 `require_visual` runs use the strict 0.8 operation/target confidence floors;
 escalated and `always` runs keep the text floors (0.35 operation, 0.2 target)
-and still need visual completion verification. The one escalation is reported
-as `vision.escalations`.
+and finish on the text `DONE` rules and goal check: images there only help choose
+actions, so only `require_visual` runs need visual completion verification. The
+one escalation is reported as `vision.escalations`.
 `vision=always` starts visually; `vision=off` disables images for that task.
 An agent cannot grant itself operator permission.
 
@@ -87,8 +88,13 @@ histories. The upstream provider's retention policy is separate.
 
 The model chooses only from observed DOM actions. Before a visual action, a fresh
 masked capture must match the selected target's pixels and DOM fingerprint.
-Completion requires a fresh image, an affirmative Noul answer, and another
-capture that confirms the evidence has not changed during verification. These
+Completion of a `require_visual` task requires a fresh image, an affirmative
+Noul answer, and another capture that confirms the evidence has not changed
+during verification. The Noul asks whether the image shows the goal's end state.
+It passes at 0.95, or at 0.8 when the deciding request's own goal check, asked
+about the same image, is at least 0.9. Measured on the same viewports, a visibly
+open dropdown scored 0.97 (goal check 0.96) and closed or wrong pages 0.01 (goal
+check 0.01-0.03); the previous wording scored them 0.67-0.72 and 0.47-0.65. These
 checks are conservative: video, animation and changing ads can cause safe pauses.
 They cannot make concurrent changes from unrelated clients atomic.
 
