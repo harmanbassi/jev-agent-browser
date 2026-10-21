@@ -28,6 +28,8 @@ TARGET_ATTR = "data-jev-target"
 # forever (measured 2026-09-29; at 1120x780 the options appear at once).
 VIEWPORT = (1120, 780)
 VIEWPORT_TIMEOUT = 5
+DATE_TYPES = {"date", "time", "datetime-local", "month", "week"}
+VALUE_TYPES = {"color", "range"}
 TARGET_SELECTOR = f'[{TARGET_ATTR}="1"]'
 
 # The same checks as upstream's CDP executor. It returns the hit-tested click
@@ -41,6 +43,14 @@ TARGET_JS = """(action => {
   const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2;
   if (!r.width || !r.height || x<0 || y<0 || x>=innerWidth || y>=innerHeight) return null;
   if (!e.contains(document.elementFromPoint(x,y))) return null;
+  if (action.kind==='fill' && ['color','range'].includes(action.input_type)) {
+    // Not typeable: set the model-supplied value as data on the checked node, like a select.
+    if (e.type!==action.input_type) return null;
+    e.value=String(action.text);
+    e.dispatchEvent(new Event('input',{bubbles:true}));
+    e.dispatchEvent(new Event('change',{bubbles:true}));
+    return 'selected';
+  }
   if (action.kind==='select') {
     if (e.tagName!=='SELECT' || ![...e.options].some(o=>o.value===action.value &&
         !o.disabled && !o.closest('optgroup[disabled]'))) return null;
@@ -102,6 +112,10 @@ class CamofoxReadTimeout(CamofoxError):
 
 class CamofoxAuthError(CamofoxError):
     """The browser rejected credentials or denied a protected operation."""
+
+
+class TargetReplaced(StalePage):
+    """The browser reports the input never reached the target: the page replaced it first."""
 
 
 class ActionUncertain(StalePage):
@@ -170,6 +184,12 @@ class Camofox:
         if 300 <= response.status_code < 400:
             raise CamofoxError("Camofox control endpoint redirected; configure its final URL explicitly")
         if response.status_code in {409, 422}:
+            try:
+                code = None if reply_limit else response.json().get("code")
+            except (ValueError, AttributeError):
+                code = None
+            if code == "target_replaced":
+                raise TargetReplaced(f"{path}: target replaced before input (HTTP {response.status_code})")
             raise StalePage(f"{path}: page changed (HTTP {response.status_code})")
         if response.status_code == 410:
             raise TabGone(f"Camofox {path} returned HTTP 410 (tab destroyed)")
@@ -229,6 +249,10 @@ class Camofox:
 
     def press(self, key):
         self._tab("press", key=key)
+
+    def fill(self, selector, text):
+        """Set a field's value the way Playwright fills it (ISO values for date/time inputs)."""
+        self._tab("type", selector=selector, text=text, mode="fill")
 
     def type_text(self, text):
         # Types into whatever holds focus, like upstream's CDP Input.insertText.
@@ -417,17 +441,25 @@ class Page:
         else:
             if type(action.get("node")) is not int:
                 raise ValueError("Invalid observed node")
-            point = self.cf.evaluate(TARGET_JS + "(" + json.dumps(action) + ")")
+            data = {**action, "text": text} if action.get("input_type") in VALUE_TYPES else action
+            point = self.cf.evaluate(TARGET_JS + "(" + json.dumps(data) + ")")
             if point is None:
                 raise StalePage("Target changed or is covered. Observe again.")
             if kind == "click" and self.download_ids is None:
                 self.download_ids = self._download_ids()
             try:
-                if kind in {"click", "fill"}:
-                    self.cf.click_at(point["x"], point["y"], TARGET_SELECTOR)
-                if kind == "fill":
-                    self.cf.press("Control+a")
-                    self.cf.type_text(text)
+                if point == "selected":
+                    pass  # a select option, color or range value was set inside the target check
+                elif kind == "fill" and action.get("input_type") in DATE_TYPES:
+                    self.cf.fill(TARGET_SELECTOR, text)  # typing digits into date/time pickers is unreliable
+                else:
+                    if kind in {"click", "fill"}:
+                        self.cf.click_at(point["x"], point["y"], TARGET_SELECTOR)
+                    if kind == "fill":
+                        self.cf.press("Control+a")
+                        self.cf.type_text(text)
+            except TargetReplaced:
+                raise  # never delivered: deciding again is safe
             except StalePage as e:
                 # The input passed every check and was sent; the server gave up afterwards
                 # (a click that navigated to a slow page). It may well have taken effect.

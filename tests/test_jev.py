@@ -3,7 +3,7 @@ import json
 import pytest
 import requests
 
-from jev_browser import camofox, jev
+from jev_browser import camofox, jev, questions
 
 from helpers import make_state
 
@@ -388,3 +388,15 @@ def test_a_filled_sensitive_field_is_shown_filled_but_never_offered_for_typing(m
     typing = body["questions"]["type_text_target"]["criteria"]
     assert [c["element"] for c in typing.values()] == ["[2] E-mail"]  # only the empty one can pause
     assert next(e for e in body["state"]["elements"] if e["label"] == "Telephone")["value"] == "[filled]"
+
+
+def test_the_text_helper_sees_a_date_or_time_fields_input_type():
+    action = {"label": "Preferred delivery time", "role": "textbox", "value": "", "input_type": "time"}
+    assert jev.field_context("deliver at 7:30 pm", action, make_state(), [])["field"]["input_type"] == "time"
+    assert "HH:MM" in questions.TEXT_VALUE and "YYYY-MM-DD" in questions.TEXT_VALUE
+
+
+def test_elements_carry_their_input_type():
+    elements, targets, _ = jev.action_space([{"id": "e1", "kind": "fill", "node": 1, "label": "Delivery time",
+                                              "role": "textbox", "value": "", "input_type": "time"}])
+    assert elements[0]["input_type"] == "time" and "e1" in [a["id"] for a in targets["TYPE_TEXT"].values()]

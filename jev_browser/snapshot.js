@@ -28,6 +28,8 @@
     'option','gridcell','combobox','textbox','searchbox','spinbutton'];
   const selector='a[href],button,input,textarea,select,summary,[contenteditable="true"],'+
     roles.map(role=>'[role="'+role+'"]').join(',');
+  // Inputs filled with a formatted value rather than typed text; the element carries the type.
+  const valueTypes=['date','time','datetime-local','month','week','color','range'];
   const role = e => {
     const explicit=e.getAttribute('role');
     if (roles.includes(explicit)) return explicit;
@@ -41,6 +43,7 @@
       if (e.type==='search') return 'searchbox';
       if (e.type==='number') return 'spinbutton';
       if (['text','email','url','tel'].includes(e.type)) return 'textbox';
+      if (valueTypes.includes(e.type)) return 'textbox';
     }
     return null;
   };
@@ -67,6 +70,7 @@
     if (rname==='gridcell' && e.querySelector('button,[role="button"]')) continue;
     const secret=sensitive(e);
     const base={node:identity(e),role:rname,label:name(e)||rname,...(secret?{sensitive:true}:{}),
+      ...(e.tagName==='INPUT' && valueTypes.includes(e.type)?{input_type:e.type}:{}),
       rect:{x:r.x,y:r.y,w:r.width,h:r.height}};
     for (const key of ['checked','selected','expanded']) {
       const value=e.getAttribute('aria-'+key);

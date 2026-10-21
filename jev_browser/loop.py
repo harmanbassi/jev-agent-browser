@@ -10,7 +10,7 @@ between calls so a resumed goal knows what already happened.
 import time
 
 from .camofox import ActionUncertain, CamofoxError, StalePage, TabGone
-from .jev import ModelError, action_space, choose, field_context, field_text, goal_met, verify_visual
+from .jev import GOAL_MET, ModelError, action_space, choose, field_context, field_text, goal_met, verify_visual
 from .policy import URLPolicy, action_block
 from .budget import Budget, BudgetExceeded, current, limits
 from .vision import VisionRun, VisionSettings, VisionUnavailable
@@ -184,6 +184,11 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                     if not page.fresh(state):
                         raise StalePage("Page changed since the decision.")
                     if choice == "DONE":
+                        last = history[-1] if history else {}
+                        if last.get("effect") == "uncertain" and (decision.get("completion_probability") or 0) < GOAL_MET:
+                            # The last input may not have landed (a suggestion list that re-rendered):
+                            # only a confident goal check about the current page may end the task.
+                            return result("paused", "action_uncertain")
                         if decision["confidence"] < max(min_confidence, strict):
                             if escalate():
                                 continue

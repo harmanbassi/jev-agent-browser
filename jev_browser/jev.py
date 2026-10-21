@@ -165,7 +165,8 @@ def action_space(actions):
         if node not in indices:
             index = str(len(elements) + 1)
             indices[node] = index
-            element = {k: action[k] for k in ("role", "value", "checked", "selected", "expanded") if k in action}
+            element = {k: action[k] for k in ("role", "input_type", "value", "checked", "selected", "expanded")
+                       if k in action}
             element.update(index=index, label=action["label"].split(" → ")[0], operations=[])
             if kind == "select":
                 element["value"] = action.get("current_value", "")
@@ -365,7 +366,7 @@ def verify_visual(frame, goal, vision_run, history=(), goal_check=None):
 def field_context(goal, action, page, history):
     return {
         "goal": goal,
-        "field": {k: action.get(k) for k in ("label", "role", "value")},
+        "field": {k: action.get(k) for k in ("label", "role", "input_type", "value")},
         "page": {"title": page["title"], "text": page["text"][:6000]},
         "recent_actions": [{k: h.get(k) for k in ("action", "text")} for h in history[-6:]],
     }

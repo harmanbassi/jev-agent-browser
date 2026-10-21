@@ -455,8 +455,10 @@ def test_an_abandoned_click_is_still_recorded(monkeypatch, after, effect):
     out = loop.run_task(page, "open the downloads page")
 
     step = out["steps"][0]
-    assert out["status"] == "done" and step["effect"] == effect and step["url_after"] == after["url"]
+    assert step["effect"] == effect and step["url_after"] == after["url"]
     assert seen[1][0]["effect"] == effect  # Jev knows it clicked
+    # DONE without a confident goal check is not accepted right after an uncertain click.
+    assert out["status"] == ("done" if effect == "taken" else "paused")
 
 
 class Downloading(FakePage):
@@ -516,3 +518,21 @@ def test_a_different_action_after_an_uncertain_one_proceeds(monkeypatch):
     out = loop.run_task(page, "fill and submit")
 
     assert page.acted == [("e2", None), ("e1", "x")]
+
+
+def test_done_right_after_an_uncertain_step_needs_a_confident_goal_check(monkeypatch):
+    # The destination option click was abandoned and the list stayed open: only the
+    # origin is set, so the head's DONE must not end the task.
+    page = Uncertain([make_state(url="https://a.test/flights", marker="a")])
+    script(monkeypatch, [decision("e2", "CLICK"), {**decision("DONE"), "completion_probability": 0.69}])
+
+    out = loop.run_task(page, "set origin Paris and destination London")
+
+    assert out["status"] == "paused" and out["reason"] == "action_uncertain"
+
+
+def test_done_after_an_uncertain_step_is_accepted_when_the_goal_check_confirms_it(monkeypatch):
+    page = Uncertain([make_state(url="https://a.test/flights", marker="a")])
+    script(monkeypatch, [decision("e2", "CLICK"), {**decision("DONE"), "completion_probability": 0.95}])
+
+    assert loop.run_task(page, "set the destination")["status"] == "done"

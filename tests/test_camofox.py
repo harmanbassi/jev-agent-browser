@@ -448,3 +448,39 @@ def test_a_failed_download_is_not_reported_as_started():
     page = Page(cf, sleep=lambda s: None)
     page.act(action(state, "e2"), state)
     assert page.new_downloads(wait=0) == []
+
+
+@pytest.mark.parametrize("input_type", ["date", "time", "datetime-local", "month", "week"])
+def test_date_and_time_fields_are_filled_in_their_value_format(input_type):
+    cf, state = FakeCamofox(), make_state()
+    fills = []
+    cf.fill = lambda selector, text: fills.append((selector, text))
+    target = {**action(state, "e1"), "input_type": input_type}
+    Page(cf).act(target, state, text="19:30")
+    assert fills == [(camofox.TARGET_SELECTOR, "19:30")]
+    assert not any(call[0] in {"click_at", "type", "press"} for call in cf.calls)
+
+
+@pytest.mark.parametrize("input_type", ["color", "range"])
+def test_color_and_range_values_are_set_inside_the_target_check(input_type):
+    cf, state = FakeCamofox(target="selected"), make_state()
+    target = {**action(state, "e1"), "input_type": input_type}
+    Page(cf).act(target, state, text="#ff0000")
+    assert ("target", "e1") in cf.calls and not any(call[0] in {"click_at", "type"} for call in cf.calls)
+    assert "action.text" in camofox.TARGET_JS
+
+
+def test_a_target_replaced_before_delivery_is_stale_not_uncertain(stub):
+    stub.replies = [(409, {"error": "Click target was replaced before the click was delivered.", "code": "target_replaced"})]
+    with pytest.raises(StalePage) as stale:
+        Camofox(stub.url, "u", "t").click("[data-jev-target]")
+    assert isinstance(stale.value, camofox.TargetReplaced)
+    cf, state = FakeCamofox(), make_state()
+
+    def replaced(x, y, selector):
+        raise camofox.TargetReplaced("/tabs/t/click: target replaced (HTTP 409)")
+
+    cf.click_at = replaced
+    with pytest.raises(StalePage) as refused:
+        Page(cf).act(action(state, "e2"), state)
+    assert not isinstance(refused.value, camofox.ActionUncertain)

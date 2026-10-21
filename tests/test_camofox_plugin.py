@@ -49,6 +49,10 @@ def test_image_bounds_the_dom_click_fallback_or_fails_the_build(tmp_path):
     wrapper = patched[patched.index("const click = async (options)"):]
     assert "includes('click action done')" in wrapper and "waitForURL" in wrapper
     assert patched.count("click action done") == 1
+    # An attempt that never reached the page, whose target is gone, is reported as such
+    # instead of feeding the fallbacks a replaced element.
+    assert "includes('performing click action')" in wrapper and "code: 'target_replaced'" in wrapper
+    assert "statusCode: 409" in wrapper
     for changed in (patched, CLICK_FALLBACK * 2 + CLICK_WRAPPER, CLICK_FALLBACK, CLICK_WRAPPER, "unrelated"):
         server.write_text(changed)
         out = subprocess.run(["node", str(patch), str(server)], capture_output=True, text=True)
