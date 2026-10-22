@@ -12,6 +12,7 @@ import time
 
 import requests
 
+from .policy import value_format_ok
 from .questions import GOAL_CHECK, NEXT_ACTION, TARGET, TEXT_VALUE
 from .budget import current, request_timeout
 from .config import endpoint, flag, placeholder_key
@@ -431,6 +432,7 @@ def field_text(context):
             continue
         if value is None:
             return None
-        if isinstance(value, str) and value.strip() and len(value) <= 2000:
+        if (isinstance(value, str) and value.strip() and len(value) <= 2000
+                and value_format_ok(context.get("field", {}).get("input_type"), value)):
             return value
     raise ModelError("Text helper returned no valid field value; nothing typed.")

@@ -591,7 +591,7 @@ def test_installed_forced_click_into_a_slow_page_activates_it_once(
 
 
 ROUND3_CHECKS = '''import sys, time, uuid
-from jev_browser.camofox import Camofox, Page, StalePage, ActionUncertain
+from jev_browser.camofox import Camofox, Page, StalePage, ActionUncertain, ValueRejected
 from jev_browser.policy import URLPolicy
 base, key, site = sys.argv[1:4]
 def opened(path):
@@ -620,6 +620,16 @@ try:
         state = page.observe()
         fields = {a["label"]: a for a in state["actions"] if a["kind"] == "fill"}
         assert fields[label]["value"] == value, (label, fields[label]["value"])
+    for label, value in {"Colour": "red", "Spice": "15"}.items():  # malformed; out of range (max 10)
+        try:
+            page.act(fields[label], state, text=value)
+        except ValueRejected:
+            pass
+        else:
+            raise AssertionError(f"{label} took {value!r}")
+        state = page.observe()
+        fields = {a["label"]: a for a in state["actions"] if a["kind"] == "fill"}
+        assert fields[label]["value"] == values[label], (label, fields[label]["value"])  # left as it was
 finally:
     cf.close_session()
 cf, page, state = opened("/replaced")

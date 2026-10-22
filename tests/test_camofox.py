@@ -450,22 +450,24 @@ def test_a_failed_download_is_not_reported_as_started():
     assert page.new_downloads(wait=0) == []
 
 
-@pytest.mark.parametrize("input_type", ["date", "time", "datetime-local", "month", "week"])
-def test_date_and_time_fields_are_filled_in_their_value_format(input_type):
+@pytest.mark.parametrize("input_type, value", [("date", "2026-10-22"), ("time", "19:30"),
+                                               ("datetime-local", "2026-10-22T19:30"), ("month", "2026-10"),
+                                               ("week", "2026-W43")])
+def test_date_and_time_fields_are_filled_in_their_value_format(input_type, value):
     cf, state = FakeCamofox(), make_state()
     fills = []
     cf.fill = lambda selector, text: fills.append((selector, text))
     target = {**action(state, "e1"), "input_type": input_type}
-    Page(cf).act(target, state, text="19:30")
-    assert fills == [(camofox.TARGET_SELECTOR, "19:30")]
+    Page(cf).act(target, state, text=value)
+    assert fills == [(camofox.TARGET_SELECTOR, value)]
     assert not any(call[0] in {"click_at", "type", "press"} for call in cf.calls)
 
 
-@pytest.mark.parametrize("input_type", ["color", "range"])
-def test_color_and_range_values_are_set_inside_the_target_check(input_type):
+@pytest.mark.parametrize("input_type, value", [("color", "#ff0000"), ("range", "7")])
+def test_color_and_range_values_are_set_inside_the_target_check(input_type, value):
     cf, state = FakeCamofox(target="selected"), make_state()
     target = {**action(state, "e1"), "input_type": input_type}
-    Page(cf).act(target, state, text="#ff0000")
+    Page(cf).act(target, state, text=value)
     assert ("target", "e1") in cf.calls and not any(call[0] in {"click_at", "type"} for call in cf.calls)
     assert "action.text" in camofox.TARGET_JS
 
@@ -495,3 +497,19 @@ def test_a_download_credited_while_in_progress_is_withdrawn_when_it_fails():
     page.act(action(state, "e2"), state)
     assert page.new_downloads(wait=0) == ["source.tar.xz"]  # in progress counts as started
     assert page.failed_downloads() == ["source.tar.xz"]
+
+
+@pytest.mark.parametrize("input_type, value", [("color", "red"), ("range", "lots"), ("time", "7:30 pm"), ("date", "22/10/2026")])
+def test_a_malformed_typed_value_is_refused_before_any_input(input_type, value):
+    cf, state = FakeCamofox(), make_state()
+    cf.fill = lambda selector, text: pytest.fail("nothing may be entered")
+    with pytest.raises(camofox.ValueRejected):
+        Page(cf).act({**action(state, "e1"), "input_type": input_type}, state, text=value)
+    assert not any(call[0] in {"target", "click_at", "type"} for call in cf.calls)
+
+
+def test_a_value_the_field_does_not_keep_is_reported_not_applied():
+    cf, state = FakeCamofox(target="rejected"), make_state()
+    with pytest.raises(camofox.ValueRejected):
+        Page(cf).act({**action(state, "e1"), "input_type": "range"}, state, text="15")
+    assert "return 'rejected'" in camofox.TARGET_JS

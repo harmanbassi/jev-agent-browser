@@ -56,6 +56,20 @@ class URLPolicy:
             return "Blocked: invalid or unresolvable page host."
 
 
+# HTML value formats for inputs that are filled with a formatted value, not typed text.
+VALUE_FORMATS = {
+    "date": r"\d{4}-\d{2}-\d{2}", "time": r"\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?",
+    "datetime-local": r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?", "month": r"\d{4}-\d{2}",
+    "week": r"\d{4}-W\d{2}", "color": r"#[0-9a-fA-F]{6}", "range": r"-?\d+(\.\d+)?",
+}
+
+
+def value_format_ok(input_type, text):
+    """Whether `text` is a valid value for a field of this input type (any text for others)."""
+    pattern = VALUE_FORMATS.get(input_type)
+    return pattern is None or isinstance(text, str) and re.fullmatch(pattern, text) is not None
+
+
 def action_block(action):
     """Conservative pause for known sensitive controls. This is not full DLP."""
     if action.get("sensitive") or re.search(

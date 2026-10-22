@@ -420,3 +420,13 @@ def test_elements_carry_their_input_type():
     elements, targets, _ = jev.action_space([{"id": "e1", "kind": "fill", "node": 1, "label": "Delivery time",
                                               "role": "textbox", "value": "", "input_type": "time"}])
     assert elements[0]["input_type"] == "time" and "e1" in [a["id"] for a in targets["TYPE_TEXT"].values()]
+
+
+def test_the_text_helper_must_answer_in_the_fields_value_format(monkeypatch, key):
+    replies = iter([chat(json.dumps({"text": "7:30 pm"})), chat(json.dumps({"text": "19:30"}))])
+    monkeypatch.setattr(jev, "post_json", lambda url, body: next(replies))
+    context = {"goal": "deliver at 7:30 pm", "field": {"label": "Delivery time", "input_type": "time"}}
+    assert jev.field_text(context) == "19:30"
+    monkeypatch.setattr(jev, "post_json", lambda url, body: chat(json.dumps({"text": "7:30 pm"})))
+    with pytest.raises(jev.ModelError):
+        jev.field_text(context)

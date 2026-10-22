@@ -17,7 +17,7 @@ from urllib.parse import quote
 import requests
 
 from .budget import current
-from .policy import URLPolicy
+from .policy import URLPolicy, value_format_ok
 from .environment import get
 
 READ_STATE = Path(__file__).with_name("snapshot.js").read_text()
@@ -46,7 +46,14 @@ TARGET_JS = """(action => {
   if (action.kind==='fill' && ['color','range'].includes(action.input_type)) {
     // Not typeable: set the model-supplied value as data on the checked node, like a select.
     if (e.type!==action.input_type) return null;
+    const before=e.value;
     e.value=String(action.text);
+    // The field may sanitize the value (a range clamps it): only an exact match counts as applied.
+    if (action.input_type==='range' ? Number(e.value)!==Number(action.text)
+        : e.value.toLowerCase()!==String(action.text).toLowerCase()) {
+      e.value=before;
+      return 'rejected';
+    }
     e.dispatchEvent(new Event('input',{bubbles:true}));
     e.dispatchEvent(new Event('change',{bubbles:true}));
     return 'selected';
@@ -120,6 +127,10 @@ class TargetReplaced(StalePage):
 
 class ActionUncertain(StalePage):
     """The browser gave up on an input after the target check passed: it may have taken effect."""
+
+
+class ValueRejected(CamofoxError):
+    """A typed field would not take the value (malformed, or clamped by the field); nothing was entered."""
 
 
 class TabGone(CamofoxError):
@@ -460,10 +471,14 @@ class Page:
         else:
             if type(action.get("node")) is not int:
                 raise ValueError("Invalid observed node")
+            if kind == "fill" and not value_format_ok(action.get("input_type"), text):
+                raise ValueRejected(f"{action['label']}: not a valid {action['input_type']} value; nothing entered")
             data = {**action, "text": text} if action.get("input_type") in VALUE_TYPES else action
             point = self.cf.evaluate(TARGET_JS + "(" + json.dumps(data) + ")")
             if point is None:
                 raise StalePage("Target changed or is covered. Observe again.")
+            if point == "rejected":
+                raise ValueRejected(f"{action['label']}: the field did not keep the value; nothing applied")
             if kind == "click" and self.download_ids is None:
                 self.download_ids = self._download_ids()
             try:
