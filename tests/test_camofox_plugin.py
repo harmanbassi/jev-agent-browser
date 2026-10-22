@@ -90,6 +90,13 @@ DOWNLOAD_LISTENER = """    let failure = null;
       failure,
     });
 """
+DOWNLOAD_TRIM = """async function trimTabDownloads(tabState) {
+  while (tabState.downloads.length > MAX_DOWNLOAD_RECORDS_PER_TAB) {
+    const stale = tabState.downloads.shift();
+    await removeDownloadFileIfPresent(stale);
+  }
+}
+"""
 DOWNLOAD_LIST = """    const item = {
       id: entry.id,
       failure: entry.failure,
@@ -101,7 +108,7 @@ DOWNLOAD_LIST = """    const item = {
 def test_image_lists_a_download_as_soon_as_it_starts_or_fails_the_build(tmp_path):
     patch = PLUGIN.parents[1] / "examples/camofox-download-progress.mjs"
     downloads = tmp_path / "downloads.js"
-    downloads.write_text(DOWNLOAD_LISTENER + DOWNLOAD_LIST)
+    downloads.write_text(DOWNLOAD_TRIM + DOWNLOAD_LISTENER + DOWNLOAD_LIST)
     out = subprocess.run(["node", str(patch), str(downloads)], capture_output=True, text=True)
     assert out.returncode == 0, out.stdout + out.stderr
     patched = downloads.read_text()
@@ -109,7 +116,20 @@ def test_image_lists_a_download_as_soon_as_it_starts_or_fails_the_build(tmp_path
     assert patched.index("state: 'in_progress'") < patched.index("await download.saveAs")
     assert "state: failure ? 'failed' : 'complete'" in patched and "tabState.downloads.push({\n" not in patched
     assert "state: entry.state || 'complete'," in patched
-    for changed in (patched, DOWNLOAD_LISTENER, DOWNLOAD_LIST, "unrelated"):
+    # The cap holds from the moment a download starts; a file whose entry is gone is deleted.
+    start = patched.index("tabState.downloads.push(entry);")
+    assert patched.index("await trimTabDownloads(tabState);", start) < patched.index("await download.saveAs")
+    assert "if (!tabState.downloads.includes(entry)) await removeDownloadFileIfPresent(entry);" in patched
+    # Run the patched trim: it evicts the oldest finished record, never one still in progress.
+    trim = patched[patched.index("async function trimTabDownloads"):patched.index("\n}\n", patched.index("async function trimTabDownloads")) + 3]
+    script = ("const MAX_DOWNLOAD_RECORDS_PER_TAB = 2; const removed = [];"
+              "async function removeDownloadFileIfPresent(r) { removed.push(r.id); }" + trim +
+              "const tab = {downloads: [{id: 'a', state: 'in_progress'}, {id: 'b', state: 'complete'},"
+              " {id: 'c', state: 'complete'}]};"
+              "trimTabDownloads(tab).then(() => console.log(JSON.stringify([tab.downloads.map(d => d.id), removed])));")
+    ran = subprocess.run(["node", "-e", script], capture_output=True, text=True)
+    assert ran.stdout.strip() == '[["a","c"],["b"]]', ran.stdout + ran.stderr
+    for changed in (patched, DOWNLOAD_TRIM + DOWNLOAD_LISTENER, DOWNLOAD_LISTENER + DOWNLOAD_LIST, "unrelated"):
         downloads.write_text(changed)
         out = subprocess.run(["node", str(patch), str(downloads)], capture_output=True, text=True)
         assert out.returncode != 0 and "not found exactly once" in out.stderr

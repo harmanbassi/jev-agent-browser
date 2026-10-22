@@ -54,7 +54,9 @@ click that the server abandoned after it was sent as a step with `effect`
 
 `examples/camofox-download-progress.mjs` (build arg `CAMOFOX_DOWNLOAD_PATCH`,
 default 1) makes the browser list a download as soon as it starts, with
-`state: in_progress`, and update the same entry when it completes or fails.
+`state: in_progress`, and update the same entry when it completes or fails. The
+per-tab record cap holds from the start and never evicts a download still in
+progress, and a file whose record was cleared while it arrived is deleted.
 Without it, a large file is listed only once it has fully arrived, so a client
 that checks right after its click sees nothing and may click again. Build an
 older base with `CAMOFOX_DOWNLOAD_PATCH=0` if its download code differs; the
