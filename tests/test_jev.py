@@ -430,3 +430,12 @@ def test_the_text_helper_must_answer_in_the_fields_value_format(monkeypatch, key
     monkeypatch.setattr(jev, "post_json", lambda url, body: chat(json.dumps({"text": "7:30 pm"})))
     with pytest.raises(jev.ModelError):
         jev.field_text(context)
+
+
+def test_a_reply_completed_by_a_late_chunk_is_kept(monkeypatch, key):
+    clock = iter([0, 5, 45])  # deadline set at 0; the answer's last bytes arrive at 45, after it
+    monkeypatch.setattr(jev.time, "monotonic", lambda: next(clock))
+    calls = []
+    late = Response(200, chunks=[b"   ", b'{"ok": 1}'])
+    monkeypatch.setattr(jev._HTTP, "post", lambda *a, **k: calls.append(1) or late)
+    assert jev.post_json("https://x.test", {}) == {"ok": 1} and len(calls) == 1

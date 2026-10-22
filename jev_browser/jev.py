@@ -68,7 +68,11 @@ def read_reply(response):
         for chunk in response.iter_content(65536):
             data.extend(chunk)
             if time.monotonic() > deadline:
-                raise ReplyStalled("Model provider did not finish its reply in time; no action executed.")
+                try:
+                    json.loads(data)  # the last bytes completed it: keep the answer already paid for
+                    break
+                except ValueError:
+                    raise ReplyStalled("Model provider did not finish its reply in time; no action executed.") from None
     except requests.RequestException:
         raise ModelError("Model connection failed; no action executed.") from None
     finally:
