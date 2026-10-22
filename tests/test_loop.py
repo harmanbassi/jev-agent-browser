@@ -536,3 +536,14 @@ def test_done_after_an_uncertain_step_is_accepted_when_the_goal_check_confirms_i
     script(monkeypatch, [decision("e2", "CLICK"), {**decision("DONE"), "completion_probability": 0.95}])
 
     assert loop.run_task(page, "set the destination")["status"] == "done"
+
+
+def test_a_download_that_failed_after_being_credited_may_be_retried(monkeypatch):
+    page = Downloading([make_state(url="https://a.test/downloads/")])
+    page.failed_downloads = lambda: ["python-3.15.1.exe"]  # aborted after it was listed as started
+    script(monkeypatch, [decision("e2", "CLICK"), decision("e2", "CLICK"), decision("DONE")])
+
+    out = loop.run_task(page, "download the latest release")
+
+    assert page.acted == [("e2", None), ("e2", None)] and out["status"] == "done"
+    assert out["steps"][0]["download_failed"] == "python-3.15.1.exe" and "download" not in out["steps"][0]

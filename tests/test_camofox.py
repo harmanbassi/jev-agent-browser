@@ -484,3 +484,14 @@ def test_a_target_replaced_before_delivery_is_stale_not_uncertain(stub):
     with pytest.raises(StalePage) as refused:
         Page(cf).act(action(state, "e2"), state)
     assert not isinstance(refused.value, camofox.ActionUncertain)
+
+
+def test_a_download_credited_while_in_progress_is_withdrawn_when_it_fails():
+    cf, state = FakeCamofox(), make_state()
+    started = {"id": "d1", "suggestedFilename": "source.tar.xz", "failure": None, "state": "in_progress"}
+    listings = iter([[], [started], [{**started, "failure": "canceled", "state": "failed"}]])
+    cf.downloads = lambda: next(listings)
+    page = Page(cf, sleep=lambda s: None)
+    page.act(action(state, "e2"), state)
+    assert page.new_downloads(wait=0) == ["source.tar.xz"]  # in progress counts as started
+    assert page.failed_downloads() == ["source.tar.xz"]

@@ -329,6 +329,7 @@ class Page:
         self.after_input = None
         self.sized = False
         self.download_ids = None  # baseline before the first click; False when unsupported
+        self.credited = {}  # download id -> filename counted as started
 
     def observe(self):
         if not self.sized:  # first touch of the tab; inside the loop's error handling, not __init__
@@ -398,8 +399,10 @@ class Page:
             return False  # servers without the route: no download detection
 
     def new_downloads(self, wait=2.0):
-        """Filenames the browser saved since the last check. A download is listed only
-        once the file is saved, so a click that left the page unchanged waits briefly."""
+        """Filenames of downloads that started since the last check. The patched browser
+        lists a download when it starts (state in_progress); an unpatched one only once
+        the file is saved, so a click that left the page unchanged waits briefly. Failed
+        downloads are not counted, and failed_downloads() withdraws a later failure."""
         if self.download_ids is None or self.download_ids is False:
             return []
         deadline = time.monotonic() + wait
@@ -411,8 +414,24 @@ class Page:
             new = [item for item in items if item.get("id") not in self.download_ids]
             if new or time.monotonic() >= deadline:
                 self.download_ids |= {item.get("id") for item in new}
-                return [str(item.get("suggestedFilename") or "download") for item in new if not item.get("failure")]
+                started = {item.get("id"): str(item.get("suggestedFilename") or "download") for item in new
+                           if not item.get("failure") and item.get("state") != "failed"}
+                self.credited.update(started)
+                return list(started.values())
             self.sleep(0.25)
+
+    def failed_downloads(self):
+        """Filenames of downloads counted as started that have failed since, withdrawn so
+        the click that started them may be retried."""
+        if not self.credited:
+            return []
+        try:
+            items = self.cf.downloads()
+        except (CamofoxError, StalePage):
+            return []
+        failed = [item.get("id") for item in items if item.get("id") in self.credited
+                  and (item.get("failure") or item.get("state") == "failed")]
+        return [self.credited.pop(download_id) for download_id in failed]
 
     def recover(self, url, guard):
         """Reopen `url` in a new tab after the server destroyed ours. Only for tabs this

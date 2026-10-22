@@ -234,6 +234,14 @@ def _run_task(page, goal, *, history, max_steps, min_confidence, min_target_conf
                     # About to repeat a click that changed nothing: its download may have landed since.
                     if files := page.new_downloads():
                         last["download"] = files[0]
+                fetched = [h for h in history if h.get("download")
+                           and (h.get("action"), h.get("kind"), h.get("from_url")) == same]
+                if fetched and hasattr(page, "failed_downloads"):
+                    # A download that failed after it was counted no longer blocks its click.
+                    for name in page.failed_downloads():
+                        for h in history:
+                            if h.get("download") == name:
+                                h["download_failed"] = h.pop("download")
                 if any(h.get("download") and (h.get("action"), h.get("kind"), h.get("from_url")) == same
                        for h in history):
                     return result("paused", "download_started")  # never fetch the same file again
