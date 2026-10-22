@@ -6,6 +6,9 @@ executes real mouse/keyboard input, and your agent handles planning and pauses.
 Use the Python library, CLI, local MCP server, or native Hermes plugin. Claude
 and Codex can supervise it through MCP; their models are not bundled here.
 
+Unofficial: not affiliated with or endorsed by TypeSafe, OpenRouter, Camofox
+(jo-inc) or Browser Use; their names are their owners' trademarks.
+
 Adapted from [browser-use/jev-ultrafast](https://github.com/browser-use/jev-ultrafast)
 (MIT). Requires Python 3.11+, a running Camofox service, and your own OpenRouter
 key with access to Jev's decisions endpoint. **A proxy is optional.** Requests
@@ -21,6 +24,9 @@ The repository is named `jev-agent-browser`; the Python distribution and command
 remain `jev-browser`, and the import/plugin name remains `jev_browser`.
 
 ## Install and try it
+
+Prerequisites: Python 3.11+, Docker with Compose to run the Camofox server
+(unless you already have one), and an OpenRouter API key with access to Jev.
 
 ```bash
 git clone https://github.com/harmanbassi/jev-agent-browser.git
@@ -66,6 +72,14 @@ limits. The alpha decisions API can change independently of this project.
 For browser authentication failures, cleanup warnings and missing tools, see
 [troubleshooting](docs/troubleshooting.md). `doctor --probe` verifies browser
 control and cleanup; a successful public `/health` check alone cannot verify a key.
+
+### CLI reference
+
+| Command | Options |
+| --- | --- |
+| `jev-browser run URL GOAL` | `--max-steps N` (default 25, at most 100), `--max-model-calls N` (default 100, at most 500), `--timeout SECONDS` (default 300, at most 900), `--vision {off,auto,always}`, `--require-visual` / `--no-require-visual`. Prints one JSON result and closes its session. |
+| `jev-browser doctor` | `--probe` opens and closes an example.com tab to check `/evaluate`; `--vision` checks masked capture without uploading an image; `--vision-model-probe` makes one paid image request. |
+| `jev-browser mcp` | Serves the MCP tools over stdio (requires the `mcp` extra). |
 
 ## Claude Code, Codex and other MCP clients
 
@@ -122,22 +136,52 @@ next accessed or a new session is opened. Server shutdown attempts cleanup.
 
 ### Task results
 
-Every interface (Python, CLI, MCP, Hermes) returns the same result fields:
+Every interface (Python, CLI, MCP, Hermes) returns these result fields, except
+where a row names the interfaces:
 
 | Field | Meaning |
 | --- | --- |
 | `status` | `done`, `paused` (with `reason`) or `error` |
 | `url`, `title`, `text` | The last page read, when it passed the URL policy |
 | `elements` | On `paused`: the observed controls Jev could act on |
-| `fallback` | On `paused` (Python/MCP): what the supervising agent should do next |
-| `steps` | Executed actions with `from_url` (the page they ran on), `url_after` (where they led, once that page passed the URL policy), their confidences and `page_changed`. `effect` marks a click the browser abandoned after sending it (`taken` if the page moved, else `uncertain`; an identical `uncertain` click is not repeated: `action_uncertain` pause); `download` names a file it started |
+| `confidence`, `target_confidence`, `detail` | On `low_confidence`: the operation and target confidence below the floor; `detail` when the goal check contradicted `DONE` |
+| `field` | On `missing_value`: the label of the field the goal gives no value for |
+| `fallback` | On `paused` (Python, CLI, MCP): what the supervising agent should do next. It names the MCP tools; Python has the same `Browser.snapshot`/`Browser.act`. A CLI run is one-shot, so rerun with a clearer goal or use MCP/Python to act on the same session |
+| `next`, `success` | Hermes, instead of `fallback`: guidance for this status, and whether it was not an error |
+| `session_id` | Python, CLI, MCP: the session the task ran in (already closed after a CLI run) |
+| `steps` | Executed actions: `action` (the control's label), `kind` (`click`, `fill`, `select`, `scroll`, `wait`, or `recover` for a reopened tab), `text` (the value Jev typed, else null), `from_url` (the page they ran on), `url_after` (where they led, once that page passed the URL policy), their confidences and `page_changed`. `effect` marks a click the browser abandoned after sending it (`taken` if the page moved, else `uncertain`; an identical `uncertain` click is not repeated: `action_uncertain` pause); `download` names a file it started, renamed `download_failed` if that download later failed (the click may then be repeated); `tab_lost` marks the action during which the browser destroyed the tab |
 | `jev_calls`, `model_requests` | Decisions made; model HTTP requests including retries/helpers |
+| `models` | The decision models that answered, as reported by the provider |
 | `downloads` | Files that clicks started downloading; a click that started one is not repeated (`download_started` pause) |
 | `recoveries` | Tabs the browser destroyed during a read that were reopened on the latest page (at most 2), also listed in `steps`. A tab lost during an action pauses as `tab_lost` instead, because the action may have taken effect |
 | `usage` | Reported `input_tokens`/`output_tokens` (and `cost` where the provider reports it) for the task, totalled and `by_model` |
 | `vision` | With vision allowed: image calls, captures, `uploaded_bytes`, escalations, verification |
 | `completion_probability` | The last decision's goal check: probability the goal is already met |
 | `done_by` | `goal_check` when that check (at least 0.9), not the operation choice, finished the task |
+| `elapsed_ms` | Task duration in milliseconds |
+| `warnings` | CLI: browser cleanup warnings from closing the session |
+
+| Pause `reason` | Meaning |
+| --- | --- |
+| `step_budget` | `max_steps` actions ran; continue with a fresh budget |
+| `model_budget` | `max_model_calls` model HTTP requests were used |
+| `timeout` | The task deadline passed |
+| `cancelled` | The task was cancelled (`browser_cancel`, `Browser.cancel`, or an interrupted CLI run) |
+| `no_progress` | The last three actions changed nothing, or were the same action |
+| `need_guidance` | Jev asked for guidance instead of choosing an action |
+| `blocked` | Jev judged the goal blocked on this page |
+| `low_confidence` | The chosen operation or target was below its confidence floor |
+| `sensitive_action` | The next step is a sign-in, payment, destructive or personal-data control Jev never acts on |
+| `missing_value` | The goal does not supply a value for `field` |
+| `action_uncertain` | The browser gave up on the last input after sending it and the page has not changed; it may have taken effect |
+| `download_started` | This click already started a download; it is not repeated |
+| `tab_lost` | The browser destroyed the tab during an action, which may have taken effect |
+| `vision_budget`, `vision_capture_budget` | The image request or capture budget is used up |
+| `vision_completion_unverified` | A `require_visual` task's image did not establish the goal |
+| `vision_capture_unavailable`, `vision_capture_failed`, `vision_invalid_observation`, `vision_url_blocked`, `vision_expired_observation`, `vision_target_ambiguous` | Visual evidence could not be captured or used; see [visual browsing](docs/vision.md#common-pauses) |
+
+Errors carry a readable message in `reason` instead. `vision_disabled` and
+`vision_dependency_missing` are errors returned before a task starts.
 
 Every decision also asks Jev, in the same request, whether the goal is already
 met. A confident yes (at least 0.9) finishes the task where the operation head
@@ -209,7 +253,7 @@ adapter sends that key as a Bearer token. Restart Hermes after installing/enabli
 its plugin. This requires a Hermes version providing `ctx.register_tool` and the
 `tools.browser_camofox`/`tools.browser_tool` APIs used by this plugin.
 
-The tool remains `browser_task(goal, url?, max_steps?, max_model_calls?, timeout?)`.
+The tool remains `browser_task(goal, url?, max_steps?, max_model_calls?, timeout?, vision?, require_visual?)`.
 It uses Hermes' existing tab, cookie identity, auth headers, URL checks and website
 policy. Omitting `url` continues the same tab; `browser_*` tools remain its manual
 fallback. Existing proxy/persistence settings stay on the existing Camofox server.
@@ -233,8 +277,8 @@ this setting is intended for a personal browser with coordinated use. Browser
 restarts and idle reaping can still remove tabs, requiring a fresh URL. Saved
 cookies and live page state are different forms of persistence.
 
-Native Hermes adapter compatibility is tested against the deployed setup; other
-Hermes versions can also use the standalone MCP/CLI interfaces.
+The native Hermes adapter is tested with Hermes v0.21.6; other Hermes versions
+can also use the standalone MCP/CLI interfaces.
 
 The plugin supplies Jev-first browsing instructions on Hermes versions supporting
 plugin prompt sections. This covers ordinary requests and follow-ups, manual
@@ -256,7 +300,18 @@ with Browser() as browser:
 ```
 
 `browser.snapshot(session_id)` and `browser.act(session_id, element_id, action,
-value=None)` are the MCP `browser_snapshot`/`browser_act` supervisor tools.
+value=None)` are the MCP `browser_snapshot`/`browser_act` supervisor tools. The
+other MCP tools map the same way:
+
+```python
+browser = Browser(max_sessions=16, idle_seconds=900)  # the defaults
+sid = browser.open("https://example.com")["session_id"]  # no model call yet
+result = browser.run(sid, "Read the page title")
+browser.inspect(sid)   # last result, or {"status": "running"}
+browser.cancel(sid)    # cooperative; a running task pauses as cancelled
+browser.close(sid)     # destroys the session's identity and saved state
+browser.shutdown()     # closes every session (the context manager does this)
+```
 
 The lower-level `Camofox`, `Page`, and `run_task` interfaces remain available for
 custom drivers. `run_task` defaults to the public-page URL policy. Supply an
@@ -299,6 +354,9 @@ blocked even with `JEV_ALLOW_PRIVATE_URLS=1`.
 | `JEV_ALLOWED_HOSTS` | Empty; otherwise exact comma-separated page hosts |
 | `JEV_ALLOW_PRIVATE_URLS` | `0`; standalone private-page opt-in |
 | `JEV_FAST_CLICK` | `0`; optional [Camofox plugin](camofox_plugin/README.md) |
+| `JEV_ALLOW_INSECURE_CAMOFOX` | `0`; permit a remote cleartext (`http://`) Camofox on a trusted network |
+| `JEV_ALLOW_INSECURE_MODEL_URLS` | `0`; permit cleartext development model endpoints |
+| `JEV_VISION_*` | Optional visual browsing; see the [vision settings](docs/vision.md#install-and-configure) |
 
 Task defaults: 25 executed steps, 100 model HTTP requests including helper/retry
 calls, 300 seconds. Maximums: 100 steps, 500 requests, 900 seconds. Cancellation

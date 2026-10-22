@@ -1,9 +1,8 @@
 # Security and data boundaries
 
-Report vulnerabilities privately through GitHub's private vulnerability reporting
-for this repository when enabled; otherwise contact the maintainer through their
-GitHub profile to arrange a private report. Do not include credentials or page
-content in public issues.
+Report vulnerabilities privately through GitHub's private vulnerability
+reporting: open this repository's **Security** tab and choose **Report a
+vulnerability**. Do not include credentials or page content in public issues.
 
 The default core policy allows public HTTP(S) page URLs and blocks metadata,
 nonpublic addresses, URL credentials, and credential-like query parameters. The

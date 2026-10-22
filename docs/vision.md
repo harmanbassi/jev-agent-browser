@@ -121,6 +121,8 @@ controls still require a supervising agent's manual tools.
 - `vision_dependency_missing`: install the vision extra in the executing interpreter.
 - `vision_capture_unavailable`: rebuild/enable the matching browser plugin.
 - `vision_capture_failed` / `vision_invalid_observation`: capture or protocol validation failed.
+- `vision_url_blocked`: the captured page's URL failed the URL policy, so its image was not sent.
+- `vision_expired_observation`: the capture was over 30 seconds old before its image request; resume to capture again.
 - `vision_budget` / `vision_capture_budget`: resume with an appropriate fresh budget.
 - `vision_completion_unverified`: the image did not establish every requirement.
 - `vision_target_ambiguous`: an uncertain target and box/presence evidence that did not identify one observed control.

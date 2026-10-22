@@ -143,3 +143,11 @@ def test_dockerfile_applies_the_download_patch_behind_its_own_build_arg():
             '/app/lib/downloads.js; fi') in dockerfile
     assert "!examples/camofox-download-progress.mjs" in (repo / ".dockerignore").read_text().splitlines()
     assert "CAMOFOX_DOWNLOAD_PATCH=0" in (repo / "docs/camofox-operations.md").read_text()
+
+
+def test_dockerfile_npm_audit_is_fatal_by_default_and_can_only_warn():
+    repo = PLUGIN.parents[1]
+    dockerfile = (repo / "examples/Dockerfile").read_text()
+    assert "ARG NPM_AUDIT_FATAL=1" in dockerfile.split("FROM ", 1)[1]
+    assert '{ npm audit --omit=dev --audit-level=high || [ "$NPM_AUDIT_FATAL" = "0" ]; }' in dockerfile
+    assert "NPM_AUDIT_FATAL=0" in (repo / "docs/camofox-operations.md").read_text()

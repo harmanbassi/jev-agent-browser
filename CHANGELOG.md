@@ -2,9 +2,28 @@
 
 ## Unreleased
 
+## 0.4.0 — 2026-10-22
+
 - Bound each model reply by a 30 s wall-clock deadline and retry a stalled reply
   like a 503. The request timeout only bounded each read, so a provider keeping
-  an unfinished reply alive held tasks for 5-10 minutes in live runs.
+  an unfinished reply alive held tasks for 5-10 minutes in live runs. A reply
+  whose last bytes complete it just after the deadline is kept, not retried.
+- Typed date, time, datetime-local, month, week, color and range values are
+  checked against the HTML format before anything is entered: a malformed value
+  ends the task with status `error` ("...: not a valid X value; nothing
+  entered"). A color or range field that does not keep the exact value (a range
+  clamps it) is restored and ends the same way ("...: the field did not keep the
+  value; nothing applied").
+- A download that fails after its click was counted as started is recorded as
+  `download_failed` in that step and no longer blocks the click with
+  `download_started`.
+- Browser image: the download-progress patch keeps the per-tab download cap
+  without evicting a download still in progress, and deletes a finished file
+  whose record was cleared while it arrived instead of orphaning it.
+- Browser image: `NPM_AUDIT_FATAL=0` (build arg) turns a high/critical npm audit
+  finding into a warning; the default still fails the build.
+- The Hermes plugin manifest version now follows the package version (it still
+  said 0.2.2), checked by a test. Package metadata lists classifiers and links.
 - **Rebuild the browser image.** `snapshot.js` changed, so its hash changed: clients
   of this version need the image built from it for visual observations, and older
   clients against the new image pause visual tasks with `vision_capture_failed`
@@ -24,7 +43,6 @@
 - Browser image: downloads are listed as soon as they start (`state:
   in_progress`, separate `CAMOFOX_DOWNLOAD_PATCH` build arg), so a large download
   counts as started right after its click.
-
 - Record a click the browser abandoned after sending it (a 409/422 from the input
   itself) as a step with `effect`: `taken` when the page moved, otherwise
   `uncertain`. Previously a click that navigated to a slow page vanished from

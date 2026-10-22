@@ -4,12 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jev-browser"
-version = "0.3.0"
+version = "0.4.0"
 description = "Jev browser execution for agents through Python, CLI, MCP, and Hermes."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE", "LICENSE-jev-ultrafast"]
 requires-python = ">=3.11"
+authors = [{name = "harmanbassi"}]
+keywords = ["browser-automation", "agents", "mcp", "jev", "camofox", "openrouter", "hermes"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+]
 dependencies = ["requests>=2.33.0,<3"]
 
 [project.optional-dependencies]
@@ -20,6 +33,8 @@ dev = ["pytest>=8", "coverage>=7", "build>=1.2", "setuptools>=77", "mcp>=2.0,<3"
 [project.urls]
 Repository = "https://github.com/harmanbassi/jev-agent-browser"
 Issues = "https://github.com/harmanbassi/jev-agent-browser/issues"
+Changelog = "https://github.com/harmanbassi/jev-agent-browser/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/harmanbassi/jev-agent-browser#readme"
 
 [project.scripts]
 jev-browser = "jev_browser.cli:main"

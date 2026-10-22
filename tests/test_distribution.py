@@ -1,11 +1,13 @@
 """Exercise the artifact users install, outside the source directory."""
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import zipfile
 import tarfile
+import tomllib
 import pytest
 
 
@@ -79,3 +81,10 @@ def test_tracked_release_tree_excludes_private_development_tooling():
     names = subprocess.check_output(["git", "ls-files", "-z"], cwd=repo).decode().split("\0")
     assert not any(n.startswith((".claude/", "scripts/gate", "docs/specs/")) for n in names)
     assert "scripts/mutate-python.py" not in names and "scripts/test-stack.sh.example" not in names
+
+
+def test_plugin_manifest_version_matches_the_package_version():
+    repo = Path(__file__).resolve().parents[1]
+    package = tomllib.loads((repo / "pyproject.toml").read_text())["project"]["version"]
+    plugin, = re.findall(r"^version: *(\S+)$", (repo / "jev_browser/plugin.yaml").read_text(), re.M)
+    assert plugin == package

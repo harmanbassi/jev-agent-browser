@@ -9,7 +9,7 @@ mirror upstream browser binaries; they are not new Camofox server releases.
 | Build | Verification and guidance |
 | --- | --- |
 | Camofox 1.18.1 plus `examples/Dockerfile` | Recommended baseline; installed-wheel execution and cleanup tested on Linux x86_64. |
-| Existing Camofox 1.14.0 with a reviewed dependency layer | Tested deployment compatibility; upgrade the server after staging. |
+| Existing Camofox 1.14.0 with a reviewed dependency layer | Tested with Camofox 1.14.0; upgrade the server after staging. |
 | Other versions/platforms | Verify `doctor --probe` and browser tasks before relying on them. |
 
 The pinned 1.18.1 container bundles Camoufox 152.0.4 beta.28 and camoufox-js
@@ -25,7 +25,9 @@ Docker image's binary version.
 
 The Jev Dockerfile installs pinned JavaScript security fixes without lifecycle
 scripts, preserving the base's Firefox and native SQLite build. It audits the
-result and fails on remaining high/critical npm findings. Repeat scans when
+result and fails on remaining high/critical npm findings. If a newly published
+advisory blocks a build you need, `--build-arg NPM_AUDIT_FATAL=0` prints the
+audit as a warning and continues; the default (1) is unchanged. Repeat scans when
 updating the base; this is not an exhaustive OS/browser security scan.
 
 `examples/Dockerfile` also carries a temporary patch to Camofox 1.18.1's
