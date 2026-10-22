@@ -317,3 +317,25 @@ def test_visual_verification_never_counts_an_unconfirmed_action_as_evidence(monk
     assert [step["action"] for step in evidence] == ["Code", "Search"]
     assert evidence[0]["effect"] == "taken"
     assert "absent or ambiguous evidence does not" in seen[0]["questions"]["satisfied"]["instructions"]["question"].lower()
+
+
+def test_a_filled_sensitive_field_stays_filled_when_vision_masks_values(monkeypatch):
+    f = frame()
+    phone = {"id": "e2", "kind": "fill", "node": 2, "label": "Telephone", "role": "textbox", "sensitive": True,
+             "value": "[filled]", "rect": {"x": 300, "y": 300, "w": 100, "h": 30}}
+    f.state["actions"] = [f.state["actions"][0], phone]
+    f.state["guards"] = {"1": ["g1"], "2": ["g2"]}
+    f.safe = {**f.safe, "actions": [f.state["actions"][0], {**phone, "value": ""}]}  # the plugin masks every value
+    seen = []
+
+    def post(url, body, **kwargs):
+        seen.append(body)
+        ops = body["questions"]["operation"]["criteria"]
+        targets = body["questions"]["click_target"]["criteria"]
+        return {"answers": {"operation": answer("CLICK", ops, .99), "click_target": answer("1", targets, .99)}}
+
+    monkeypatch.setattr(jev, "post_json", post)
+    jev.choose(f.state, "submit", [], frame=f, vision_run=VisionRun(VisionSettings(enabled=True)))
+    assert "type_text_target" not in seen[0]["questions"]
+    element = next(e for e in seen[0]["state"][0]["elements"] if e["label"] == "Telephone")
+    assert element["value"] == "[filled]"

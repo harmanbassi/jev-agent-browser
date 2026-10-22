@@ -36,8 +36,8 @@ DONE_SUPPORT = 0.15
 # only pick one of the TOP_K most probable observed classes.
 TIE = 0.5
 TOP_K = 3
-GUARD_HREF = 14
-FILLED = "[filled]"  # snapshot.js's stand-in for a sensitive field's value  # position of the href attribute in snapshot.js's cache.guard tuple
+GUARD_HREF = 14  # position of the href attribute in snapshot.js's cache.guard tuple
+FILLED = "[filled]"  # snapshot.js's stand-in for a sensitive field's value
 REPLY_DEADLINE = 30  # seconds for a whole model reply, whatever keeps the connection alive
 _HTTP = requests.Session()
 _HTTP.max_redirects = 0  # Never forward a provider key via a redirect.
@@ -226,15 +226,19 @@ STOPS = {
 
 def choose(state, goal, history, *, frame=None, vision_run=None, target_floor=0.0):
     guards = state.get("guards") or {}
+    # A sensitive field someone already filled shows "[filled]" (never its value). Jev never
+    # types personal data, so it is not offered for typing and cannot pause the task again.
+    # Read from the unmasked observation: the masked visual one blanks every value.
+    filled_ids = {a["id"] for a in state["actions"]
+                  if a.get("sensitive") and a["kind"] == "fill" and a.get("value") == FILLED}
     if frame is not None:
         state = frame.safe
     elements, targets, controls = action_space(state["actions"])
-    # A sensitive field someone already filled shows "[filled]" (never its value). Jev never
-    # types personal data, so it is not offered for typing and cannot pause the task again.
-    filled = {i for i, a in targets.get("TYPE_TEXT", {}).items() if a.get("sensitive") and a.get("value") == FILLED}
+    filled = {i: a for i, a in targets.get("TYPE_TEXT", {}).items() if a["id"] in filled_ids}
     for index in filled:
         del targets["TYPE_TEXT"][index]
         elements[int(index) - 1]["operations"].remove("TYPE_TEXT")
+        elements[int(index) - 1]["value"] = FILLED  # the marker only, never a value
     if not targets.get("TYPE_TEXT", True):
         del targets["TYPE_TEXT"]
     labels = {
@@ -285,8 +289,8 @@ def choose(state, goal, history, *, frame=None, vision_run=None, target_floor=0.
         for question in questions.values():
             question["instructions"]["visual_rules"] = visual_rules
         for element in elements:
-            candidate = next(v for group in targets.values() for index, v in group.items()
-                             if index.split(":")[0] == element["index"])
+            candidate = next((v for group in targets.values() for index, v in group.items()
+                              if index.split(":")[0] == element["index"]), None) or filled[element["index"]]
             element["image_rectangle"] = frame.rect(candidate)
         body["model"] = vision_run.settings.model
         body["state"] = [body["state"], frame.image_part()]
