@@ -78,6 +78,21 @@ MENU_HTML = b'''<!doctype html><title>Menu</title>
 this.setAttribute('aria-expanded',String(!open));document.getElementById('menu').hidden=open},1200)">Trip type</button>
 <ul id="menu" role="listbox" hidden><li role="option">Round trip</li><li role="option">One way</li></ul>'''
 DOWNLOAD_HTML = b'<!doctype html><title>Get it</title><a href="/installer.bin">Download installer</a>'
+# A large file the fixture sends slowly; a filled phone field; date/time/color/range
+# inputs; and an option the page replaces with an identical one the moment it is tagged.
+BIG_DOWNLOAD_HTML = b'<!doctype html><title>Source</title><a href="/source.tar.xz">Download the source</a>'
+FORM_HTML = b'''<!doctype html><title>Order</title>
+<label>Telephone <input type="tel" value="5550100"></label>
+<label>E-mail <input type="email"></label>
+<label>Delivery time <input type="time"></label>
+<label>Delivery date <input type="date"></label>
+<label>Colour <input type="color"></label>
+<label>Spice <input type="range" min="0" max="10"></label>'''
+REPLACED_HTML = b'''<!doctype html><title>Suggestions</title>
+<ul id="list"><li role="option">London</li></ul>
+<script>new MutationObserver(()=>{const o=document.querySelector('[data-jev-target]');
+if(!o)return;const n=document.createElement('li');n.setAttribute('role','option');n.textContent='London';
+o.replaceWith(n);}).observe(document.getElementById('list'),{attributes:true,subtree:true});</script>'''
 # A link that never stops moving fails Playwright's stability check, so Camofox
 # retries with a forced click; that forced click opens a slow page.
 JIGGLE_HTML = b'''<!doctype html><title>Moving</title>
@@ -104,6 +119,18 @@ def local_provider():
             self.wfile.write(data)
 
         def do_GET(self):
+            if self.path == "/source.tar.xz":  # ~2 MB at ~200 KB/s: still arriving after the click's check
+                self.send_response(200)
+                self.send_header("Content-Disposition", 'attachment; filename="source.tar.xz"')
+                self.send_header("Content-Length", str(2_000_000))
+                self.end_headers()
+                try:
+                    for _ in range(40):
+                        self.wfile.write(b"x" * 50_000)
+                        time.sleep(0.25)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # the browser session closed mid-download
+                return
             if self.path == "/installer.bin":
                 self.send_response(200)
                 self.send_header("Content-Disposition", 'attachment; filename="installer.bin"')
@@ -117,7 +144,8 @@ def local_provider():
                 time.sleep(6)
             pages = {"/vision": VISION_HTML, "/overlay": OVERLAY_HTML, "/code": CODE_HTML, "/swap": SWAP_HTML,
                      "/nav": NAV_HTML, "/slow": SLOW_HTML, "/menu": MENU_HTML, "/download": DOWNLOAD_HTML,
-                     "/jiggle": JIGGLE_HTML, "/slow-forced": SLOW_HTML}
+                     "/jiggle": JIGGLE_HTML, "/slow-forced": SLOW_HTML, "/source": BIG_DOWNLOAD_HTML,
+                     "/form": FORM_HTML, "/replaced": REPLACED_HTML}
             self.reply(200, pages.get(self.path, HTML), "text/html")
 
         def do_POST(self):
@@ -367,7 +395,8 @@ try:
     contact=[a for a in state["actions"] if a["label"] in {"Contact", "Open Contact"}]
     expiry=[a for a in state["actions"] if a["label"]=="Card expiry"]
     assert contact and expiry, (state['actions'], cf.evaluate("[...document.querySelectorAll('input,select')].map(e=>[e.autocomplete,e.getAttribute('autocomplete')])"))
-    assert all(a["sensitive"] and a["value"]=='' for a in contact+expiry)
+    assert all(a["sensitive"] and "private" not in a["value"] for a in contact+expiry)
+    assert all(a["value"]=="[filled]" for a in contact)  # filled, value never disclosed
     assert not any(a["kind"]=='select' for a in expiry)
     changing=next(a for a in state["actions"] if a["label"]=='Choice → Two')
     cf.evaluate("(() => {document.getElementById('changing').setAttribute('autocomplete','cc-exp-month');return true;})()")
@@ -559,3 +588,72 @@ def test_installed_forced_click_into_a_slow_page_activates_it_once(
                             capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
     assert seen.count("/slow-forced") == 1, seen  # the fallbacks never activated the departed page again
+
+
+ROUND3_CHECKS = '''import sys, time, uuid
+from jev_browser.camofox import Camofox, Page, StalePage, ActionUncertain, ValueRejected
+from jev_browser.policy import URLPolicy
+base, key, site = sys.argv[1:4]
+def opened(path):
+    identity = "jev-r3-" + uuid.uuid4().hex
+    cf = Camofox.open(base, identity, identity, site + path, headers={"Authorization": "Bearer " + key},
+                      guard=URLPolicy(allow_private=True))
+    page = Page(cf)
+    return cf, page, page.observe()
+cf, page, state = opened("/source")
+try:
+    page.act(next(a for a in state["actions"] if a["kind"] == "click"), state)
+    page.observe()
+    assert page.new_downloads() == ["source.tar.xz"]  # listed while still arriving
+finally:
+    cf.close_session()
+cf, page, state = opened("/form")
+try:
+    fields = {a["label"]: a for a in state["actions"] if a["kind"] == "fill"}
+    # What Jev sees (actions and text); executor-only guards keep raw values for change checks.
+    assert fields["Telephone"]["value"] == "[filled]" and "5550100" not in str(state["actions"]) + state["text"]
+    assert fields["E-mail"]["value"] == ""
+    values = {"Delivery time": "19:30", "Delivery date": "2026-10-22", "Colour": "#ff0000", "Spice": "7"}
+    for label, value in values.items():
+        assert fields[label]["input_type"] in {"time", "date", "color", "range"}, fields[label]
+        page.act(fields[label], state, text=value)
+        state = page.observe()
+        fields = {a["label"]: a for a in state["actions"] if a["kind"] == "fill"}
+        assert fields[label]["value"] == value, (label, fields[label]["value"])
+    for label, value in {"Colour": "red", "Spice": "15"}.items():  # malformed; out of range (max 10)
+        try:
+            page.act(fields[label], state, text=value)
+        except ValueRejected:
+            pass
+        else:
+            raise AssertionError(f"{label} took {value!r}")
+        state = page.observe()
+        fields = {a["label"]: a for a in state["actions"] if a["kind"] == "fill"}
+        assert fields[label]["value"] == values[label], (label, fields[label]["value"])  # left as it was
+finally:
+    cf.close_session()
+cf, page, state = opened("/replaced")
+try:
+    started = time.monotonic()
+    try:
+        page.act(next(a for a in state["actions"] if a["label"] == "London"), state)
+    except ActionUncertain:
+        raise AssertionError("a target replaced before the click is not an uncertain click")
+    except StalePage:
+        pass
+    else:
+        raise AssertionError("a replaced target must not count as clicked")
+    assert time.monotonic() - started < 8, time.monotonic() - started  # no 12 s of fallbacks
+finally:
+    cf.close_session()
+'''
+
+
+def test_installed_downloads_sensitive_values_typed_inputs_and_replaced_targets(
+        installed_package, local_provider, disposable_browser, tmp_path):
+    port, _ = local_provider
+    url, key = disposable_browser
+    result = subprocess.run([sys.executable, "-c", ROUND3_CHECKS, url, key, f"http://127.0.0.1:{port}"],
+                            cwd=tmp_path, env={**os.environ, "PYTHONPATH": str(installed_package)},
+                            capture_output=True, text=True, timeout=180)
+    assert result.returncode == 0, result.stdout + result.stderr

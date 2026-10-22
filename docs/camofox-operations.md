@@ -52,6 +52,16 @@ click hang, its HTTP 410s and the slow-navigation 422s. The client records a
 click that the server abandoned after it was sent as a step with `effect`
 (`taken` when the page moved, otherwise `uncertain`), so it is not lost either way.
 
+`examples/camofox-download-progress.mjs` (build arg `CAMOFOX_DOWNLOAD_PATCH`,
+default 1) makes the browser list a download as soon as it starts, with
+`state: in_progress`, and update the same entry when it completes or fails. The
+per-tab record cap holds from the start and never evicts a download still in
+progress, and a file whose record was cleared while it arrived is deleted.
+Without it, a large file is listed only once it has fully arrived, so a client
+that checks right after its click sees nothing and may click again. Build an
+older base with `CAMOFOX_DOWNLOAD_PATCH=0` if its download code differs; the
+patch fails the build rather than guessing.
+
 Clients that opened their own tab also recover from a 410 during a read, when no
 action was in flight: they reopen the most recently observed page in the same
 identity (cookies survive, the URL policy is checked again), at most twice per

@@ -12,6 +12,7 @@ import time
 
 import requests
 
+from .policy import value_format_ok
 from .questions import GOAL_CHECK, NEXT_ACTION, TARGET, TEXT_VALUE
 from .budget import current, request_timeout
 from .config import endpoint, flag, placeholder_key
@@ -37,6 +38,8 @@ DONE_SUPPORT = 0.15
 TIE = 0.5
 TOP_K = 3
 GUARD_HREF = 14  # position of the href attribute in snapshot.js's cache.guard tuple
+FILLED = "[filled]"  # snapshot.js's stand-in for a sensitive field's value
+REPLY_DEADLINE = 30  # seconds for a whole model reply, whatever keeps the connection alive
 _HTTP = requests.Session()
 _HTTP.max_redirects = 0  # Never forward a provider key via a redirect.
 
@@ -45,8 +48,36 @@ class ModelError(RuntimeError):
     """A model call failed; nothing was executed in the browser."""
 
 
+class ReplyStalled(ModelError):
+    """The provider kept a reply open without finishing it."""
+
+
 def api_key():
     return get("JEV_OPENROUTER_KEY") or get("OPENROUTER_API_KEY") or ""
+
+
+def read_reply(response):
+    """The whole reply within a wall-clock deadline. The request timeout bounds each
+    read only, so a provider keeping an unfinished reply alive with whitespace (seen
+    live for minutes) could otherwise hold the task far past its own deadline."""
+    budget = current.get()
+    allowed = REPLY_DEADLINE if budget is None else min(REPLY_DEADLINE, budget.timeout - (time.monotonic() - budget.started))
+    deadline = time.monotonic() + max(0.001, allowed)
+    data = bytearray()
+    try:
+        for chunk in response.iter_content(65536):
+            data.extend(chunk)
+            if time.monotonic() > deadline:
+                try:
+                    json.loads(data)  # the last bytes completed it: keep the answer already paid for
+                    break
+                except ValueError:
+                    raise ReplyStalled("Model provider did not finish its reply in time; no action executed.") from None
+    except requests.RequestException:
+        raise ModelError("Model connection failed; no action executed.") from None
+    finally:
+        response.close()
+    return bytes(data)
 
 
 def post_json(url, body, *, frame=None, vision_run=None):
@@ -67,16 +98,22 @@ def post_json(url, body, *, frame=None, vision_run=None):
             vision_run.request(frame)
         try:
             response = _HTTP.post(url, json=body, headers={"Authorization": f"Bearer {key}"},
-                                  timeout=request_timeout(25))
+                                  timeout=request_timeout(25), stream=True)
         except requests.RequestException:
             raise ModelError("Model connection failed; no action executed.") from None
         if response.status_code in {429, 503, 529} and attempt < 2:
+            response.close()
             time.sleep(0.5 * 2**attempt)
             continue
         if response.status_code >= 400:
+            response.close()
             raise ModelError(f"Model provider returned HTTP {response.status_code}; no action executed.")
         try:
-            result = response.json()
+            result = json.loads(read_reply(response))
+        except ReplyStalled:
+            if attempt < 2:
+                continue  # transient, like a 503: the next attempt usually answers at once
+            raise
         except ValueError:
             raise ModelError("Model provider returned a non-JSON reply; no action executed.") from None
         if isinstance(result, dict) and (budget := current.get()):
@@ -164,7 +201,8 @@ def action_space(actions):
         if node not in indices:
             index = str(len(elements) + 1)
             indices[node] = index
-            element = {k: action[k] for k in ("role", "value", "checked", "selected", "expanded") if k in action}
+            element = {k: action[k] for k in ("role", "input_type", "value", "checked", "selected", "expanded")
+                       if k in action}
             element.update(index=index, label=action["label"].split(" → ")[0], operations=[])
             if kind == "select":
                 element["value"] = action.get("current_value", "")
@@ -193,9 +231,21 @@ STOPS = {
 
 def choose(state, goal, history, *, frame=None, vision_run=None, target_floor=0.0):
     guards = state.get("guards") or {}
+    # A sensitive field someone already filled shows "[filled]" (never its value). Jev never
+    # types personal data, so it is not offered for typing and cannot pause the task again.
+    # Read from the unmasked observation: the masked visual one blanks every value.
+    filled_ids = {a["id"] for a in state["actions"]
+                  if a.get("sensitive") and a["kind"] == "fill" and a.get("value") == FILLED}
     if frame is not None:
         state = frame.safe
     elements, targets, controls = action_space(state["actions"])
+    filled = {i: a for i, a in targets.get("TYPE_TEXT", {}).items() if a["id"] in filled_ids}
+    for index in filled:
+        del targets["TYPE_TEXT"][index]
+        elements[int(index) - 1]["operations"].remove("TYPE_TEXT")
+        elements[int(index) - 1]["value"] = FILLED  # the marker only, never a value
+    if not targets.get("TYPE_TEXT", True):
+        del targets["TYPE_TEXT"]
     labels = {
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
         "TYPE_TEXT": "Enter or replace text in an editable field. A small LLM will supply the value from the goal.",
@@ -244,8 +294,8 @@ def choose(state, goal, history, *, frame=None, vision_run=None, target_floor=0.
         for question in questions.values():
             question["instructions"]["visual_rules"] = visual_rules
         for element in elements:
-            candidate = next(v for group in targets.values() for index, v in group.items()
-                             if index.split(":")[0] == element["index"])
+            candidate = next((v for group in targets.values() for index, v in group.items()
+                              if index.split(":")[0] == element["index"]), None) or filled[element["index"]]
             element["image_rectangle"] = frame.rect(candidate)
         body["model"] = vision_run.settings.model
         body["state"] = [body["state"], frame.image_part()]
@@ -356,7 +406,7 @@ def verify_visual(frame, goal, vision_run, history=(), goal_check=None):
 def field_context(goal, action, page, history):
     return {
         "goal": goal,
-        "field": {k: action.get(k) for k in ("label", "role", "value")},
+        "field": {k: action.get(k) for k in ("label", "role", "input_type", "value")},
         "page": {"title": page["title"], "text": page["text"][:6000]},
         "recent_actions": [{k: h.get(k) for k in ("action", "text")} for h in history[-6:]],
     }
@@ -386,6 +436,7 @@ def field_text(context):
             continue
         if value is None:
             return None
-        if isinstance(value, str) and value.strip() and len(value) <= 2000:
+        if (isinstance(value, str) and value.strip() and len(value) <= 2000
+                and value_format_ok(context.get("field", {}).get("input_type"), value)):
             return value
     raise ModelError("Text helper returned no valid field value; nothing typed.")

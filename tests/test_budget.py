@@ -28,7 +28,7 @@ def test_cancellation_and_timeout_pause_without_actions(monkeypatch):
 
 def test_request_budget_counts_retry_and_text_helper_calls(monkeypatch):
     monkeypatch.setenv("JEV_OPENROUTER_KEY", "secret")
-    replies = iter([type("Reply", (), {"status_code": 503})()])
+    replies = iter([type("Reply", (), {"status_code": 503, "close": lambda self: None})()])
     monkeypatch.setattr(jev._HTTP, "post", lambda *a, **k: next(replies))
     monkeypatch.setattr(jev.time, "sleep", lambda _: None)
     # First decision attempts an HTTP request, then the retry must stop.

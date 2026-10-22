@@ -12,6 +12,11 @@
 //    first click, forced retries and the search-results path), so the wrapper now
 //    treats a delivered click as success and waits, bounded inside the route
 //    budget, for its navigation to commit.
+// 3. When the page replaced the target before the click was dispatched (a
+//    suggestion list re-rendering), the fallbacks spent about 12 s on a node that
+//    was gone and returned 422, which a client must treat as possibly delivered.
+//    An attempt that never reached "performing click action" while its target no
+//    longer resolves now returns 409 target_replaced after the first attempt.
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const file = process.argv[2] || '/app/server.js';
@@ -28,7 +33,14 @@ const patches = [
     "          try {\n" +
     "            return await locator.click(options);\n" +
     "          } catch (err) {\n" +
-    "            if (!String(err?.message).includes('click action done')) throw err;\n" +
+    "            const message = String(err?.message);\n" +
+    "            if (!message.includes('click action done')) {\n" +
+    "              if (!message.includes('performing click action') && await locator.count().catch(() => 0) === 0) {\n" +
+    "                throw Object.assign(new Error('Click target was replaced before the click reached it. Observe again.'),\n" +
+    "                  { statusCode: 409, code: 'target_replaced' });\n" +
+    "              }\n" +
+    "              throw err;\n" +
+    "            }\n" +
     "            const from = tabState.page.url();\n" +
     "            await tabState.page.waitForURL((url) => url.href !== from, { waitUntil: 'commit',\n" +
     "              timeout: Math.max(500, Math.min(10000, remainingBudget() - 5000)) }).catch(() => {});\n" +

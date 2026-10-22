@@ -64,7 +64,7 @@ def test_source_archive_contains_security_setup_and_builds_a_wheel(tmp_path):
         names = {name.split("/", 1)[-1] for name in source.getnames()}
     assert {"SECURITY.md", "TESTING.md", "CHANGELOG.md", "docs/agent-setup.md", "docs/camofox-operations.md",
             "docs/troubleshooting.md", "docs/releasing.md", ".env.example", ".dockerignore", "examples/compose.yaml", "examples/Dockerfile",
-            "examples/camofox-click-timeout.mjs",
+            "examples/camofox-click-timeout.mjs", "examples/camofox-download-progress.mjs",
             "docs/hermes-routing.md", "integrations/hermes/tool-search-keep.patch", "tests/helpers.py"} <= names
     assert ".env" not in names
     assert not any(n.startswith((".claude/", "scripts/", "docs/specs/")) for n in names)

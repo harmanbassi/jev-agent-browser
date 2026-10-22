@@ -17,7 +17,7 @@ from urllib.parse import quote
 import requests
 
 from .budget import current
-from .policy import URLPolicy
+from .policy import URLPolicy, value_format_ok
 from .environment import get
 
 READ_STATE = Path(__file__).with_name("snapshot.js").read_text()
@@ -28,6 +28,8 @@ TARGET_ATTR = "data-jev-target"
 # forever (measured 2026-09-29; at 1120x780 the options appear at once).
 VIEWPORT = (1120, 780)
 VIEWPORT_TIMEOUT = 5
+DATE_TYPES = {"date", "time", "datetime-local", "month", "week"}
+VALUE_TYPES = {"color", "range"}
 TARGET_SELECTOR = f'[{TARGET_ATTR}="1"]'
 
 # The same checks as upstream's CDP executor. It returns the hit-tested click
@@ -41,6 +43,21 @@ TARGET_JS = """(action => {
   const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2;
   if (!r.width || !r.height || x<0 || y<0 || x>=innerWidth || y>=innerHeight) return null;
   if (!e.contains(document.elementFromPoint(x,y))) return null;
+  if (action.kind==='fill' && ['color','range'].includes(action.input_type)) {
+    // Not typeable: set the model-supplied value as data on the checked node, like a select.
+    if (e.type!==action.input_type) return null;
+    const before=e.value;
+    e.value=String(action.text);
+    // The field may sanitize the value (a range clamps it): only an exact match counts as applied.
+    if (action.input_type==='range' ? Number(e.value)!==Number(action.text)
+        : e.value.toLowerCase()!==String(action.text).toLowerCase()) {
+      e.value=before;
+      return 'rejected';
+    }
+    e.dispatchEvent(new Event('input',{bubbles:true}));
+    e.dispatchEvent(new Event('change',{bubbles:true}));
+    return 'selected';
+  }
   if (action.kind==='select') {
     if (e.tagName!=='SELECT' || ![...e.options].some(o=>o.value===action.value &&
         !o.disabled && !o.closest('optgroup[disabled]'))) return null;
@@ -104,8 +121,16 @@ class CamofoxAuthError(CamofoxError):
     """The browser rejected credentials or denied a protected operation."""
 
 
+class TargetReplaced(StalePage):
+    """The browser reports the input never reached the target: the page replaced it first."""
+
+
 class ActionUncertain(StalePage):
     """The browser gave up on an input after the target check passed: it may have taken effect."""
+
+
+class ValueRejected(CamofoxError):
+    """A typed field would not take the value (malformed, or clamped by the field); nothing was entered."""
 
 
 class TabGone(CamofoxError):
@@ -170,6 +195,12 @@ class Camofox:
         if 300 <= response.status_code < 400:
             raise CamofoxError("Camofox control endpoint redirected; configure its final URL explicitly")
         if response.status_code in {409, 422}:
+            try:
+                code = None if reply_limit else response.json().get("code")
+            except (ValueError, AttributeError):
+                code = None
+            if code == "target_replaced":
+                raise TargetReplaced(f"{path}: target replaced before input (HTTP {response.status_code})")
             raise StalePage(f"{path}: page changed (HTTP {response.status_code})")
         if response.status_code == 410:
             raise TabGone(f"Camofox {path} returned HTTP 410 (tab destroyed)")
@@ -229,6 +260,10 @@ class Camofox:
 
     def press(self, key):
         self._tab("press", key=key)
+
+    def fill(self, selector, text):
+        """Set a field's value the way Playwright fills it (ISO values for date/time inputs)."""
+        self._tab("type", selector=selector, text=text, mode="fill")
 
     def type_text(self, text):
         # Types into whatever holds focus, like upstream's CDP Input.insertText.
@@ -305,6 +340,7 @@ class Page:
         self.after_input = None
         self.sized = False
         self.download_ids = None  # baseline before the first click; False when unsupported
+        self.credited = {}  # download id -> filename counted as started
 
     def observe(self):
         if not self.sized:  # first touch of the tab; inside the loop's error handling, not __init__
@@ -374,8 +410,10 @@ class Page:
             return False  # servers without the route: no download detection
 
     def new_downloads(self, wait=2.0):
-        """Filenames the browser saved since the last check. A download is listed only
-        once the file is saved, so a click that left the page unchanged waits briefly."""
+        """Filenames of downloads that started since the last check. The patched browser
+        lists a download when it starts (state in_progress); an unpatched one only once
+        the file is saved, so a click that left the page unchanged waits briefly. Failed
+        downloads are not counted, and failed_downloads() withdraws a later failure."""
         if self.download_ids is None or self.download_ids is False:
             return []
         deadline = time.monotonic() + wait
@@ -387,8 +425,24 @@ class Page:
             new = [item for item in items if item.get("id") not in self.download_ids]
             if new or time.monotonic() >= deadline:
                 self.download_ids |= {item.get("id") for item in new}
-                return [str(item.get("suggestedFilename") or "download") for item in new if not item.get("failure")]
+                started = {item.get("id"): str(item.get("suggestedFilename") or "download") for item in new
+                           if not item.get("failure") and item.get("state") != "failed"}
+                self.credited.update(started)
+                return list(started.values())
             self.sleep(0.25)
+
+    def failed_downloads(self):
+        """Filenames of downloads counted as started that have failed since, withdrawn so
+        the click that started them may be retried."""
+        if not self.credited:
+            return []
+        try:
+            items = self.cf.downloads()
+        except (CamofoxError, StalePage):
+            return []
+        failed = [item.get("id") for item in items if item.get("id") in self.credited
+                  and (item.get("failure") or item.get("state") == "failed")]
+        return [self.credited.pop(download_id) for download_id in failed]
 
     def recover(self, url, guard):
         """Reopen `url` in a new tab after the server destroyed ours. Only for tabs this
@@ -417,17 +471,29 @@ class Page:
         else:
             if type(action.get("node")) is not int:
                 raise ValueError("Invalid observed node")
-            point = self.cf.evaluate(TARGET_JS + "(" + json.dumps(action) + ")")
+            if kind == "fill" and not value_format_ok(action.get("input_type"), text):
+                raise ValueRejected(f"{action['label']}: not a valid {action['input_type']} value; nothing entered")
+            data = {**action, "text": text} if action.get("input_type") in VALUE_TYPES else action
+            point = self.cf.evaluate(TARGET_JS + "(" + json.dumps(data) + ")")
             if point is None:
                 raise StalePage("Target changed or is covered. Observe again.")
+            if point == "rejected":
+                raise ValueRejected(f"{action['label']}: the field did not keep the value; nothing applied")
             if kind == "click" and self.download_ids is None:
                 self.download_ids = self._download_ids()
             try:
-                if kind in {"click", "fill"}:
-                    self.cf.click_at(point["x"], point["y"], TARGET_SELECTOR)
-                if kind == "fill":
-                    self.cf.press("Control+a")
-                    self.cf.type_text(text)
+                if point == "selected":
+                    pass  # a select option, color or range value was set inside the target check
+                elif kind == "fill" and action.get("input_type") in DATE_TYPES:
+                    self.cf.fill(TARGET_SELECTOR, text)  # typing digits into date/time pickers is unreliable
+                else:
+                    if kind in {"click", "fill"}:
+                        self.cf.click_at(point["x"], point["y"], TARGET_SELECTOR)
+                    if kind == "fill":
+                        self.cf.press("Control+a")
+                        self.cf.type_text(text)
+            except TargetReplaced:
+                raise  # never delivered: deciding again is safe
             except StalePage as e:
                 # The input passed every check and was sent; the server gave up afterwards
                 # (a click that navigated to a slow page). It may well have taken effect.

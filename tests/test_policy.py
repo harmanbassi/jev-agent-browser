@@ -65,3 +65,18 @@ def test_sensitive_controls_pause_before_typing_or_clicking(monkeypatch, action)
 
 def test_normal_search_is_not_sensitive():
     assert policy.action_block({"kind": "fill", "label": "Search flights"}) is None
+
+
+@pytest.mark.parametrize("input_type, good, bad", [
+    ("time", ["19:30", "07:05:09"], ["7:30 pm", "1930", ""]),
+    ("date", ["2026-10-22"], ["22/10/2026", "2026-10-22T10:00"]),
+    ("datetime-local", ["2026-10-22T19:30"], ["2026-10-22 19:30"]),
+    ("month", ["2026-10"], ["Oct 2026"]),
+    ("week", ["2026-W43"], ["2026-43"]),
+    ("color", ["#ff0000", "#A0b1C2"], ["red", "#fff", "ff0000"]),
+    ("range", ["7", "-2.5"], ["seven", "7px"]),
+    (None, ["anything at all"], []),
+])
+def test_typed_field_values_must_use_the_html_value_format(input_type, good, bad):
+    assert all(policy.value_format_ok(input_type, v) for v in good)
+    assert not any(policy.value_format_ok(input_type, v) for v in bad)

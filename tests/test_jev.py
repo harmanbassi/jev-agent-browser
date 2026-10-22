@@ -3,7 +3,7 @@ import json
 import pytest
 import requests
 
-from jev_browser import camofox, jev
+from jev_browser import camofox, jev, questions
 
 from helpers import make_state
 
@@ -21,12 +21,20 @@ def answer(choice, ids, confidence=0.8):
 
 
 class Response:
-    def __init__(self, status, body=None):
+    def __init__(self, status, body=None, chunks=None):
         self.status_code = status
         self._body = body
+        self.chunks = chunks
+        self.closed = False
 
     def json(self):
         return self._body
+
+    def iter_content(self, size):
+        yield from self.chunks if self.chunks is not None else [json.dumps(self._body).encode()]
+
+    def close(self):
+        self.closed = True
 
 
 def test_api_key_prefers_the_jev_key(monkeypatch):
@@ -48,7 +56,7 @@ def test_post_json_retries_rate_limits_then_returns(monkeypatch, key):
     replies = iter([Response(429), Response(200, {"ok": 1})])
     sent = []
 
-    def post(url, json, headers, timeout):
+    def post(url, json, headers, timeout, **options):
         sent.append(headers["Authorization"])
         return next(replies)
 
@@ -66,12 +74,24 @@ def test_post_json_gives_up_after_three_rate_limits(monkeypatch, key):
 
 
 def test_post_json_maps_a_non_json_reply(monkeypatch, key):
-    class Bad(Response):
-        def json(self):
-            raise ValueError("Expecting value")
-
-    monkeypatch.setattr(jev._HTTP, "post", lambda *a, **k: Bad(200))
+    monkeypatch.setattr(jev._HTTP, "post", lambda *a, **k: Response(200, chunks=[b"not json"]))
     with pytest.raises(jev.ModelError, match="non-JSON"):
+        jev.post_json("https://x.test", {})
+
+
+def test_a_reply_kept_alive_without_an_answer_is_bounded(monkeypatch, key):
+    # A provider can keep an unfinished reply alive with whitespace; a per-read
+    # timeout never fires, so the whole reply has a wall-clock deadline.
+    clock = iter(range(0, 100_000, 5))
+    monkeypatch.setattr(jev.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(jev.time, "sleep", lambda s: None)
+    stalled = [Response(200, chunks=(b" " for _ in range(10_000))) for _ in range(3)]
+    replies = iter([stalled[0], Response(200, {"ok": 1})])
+    monkeypatch.setattr(jev._HTTP, "post", lambda *a, **k: next(replies))
+    assert jev.post_json("https://x.test", {}) == {"ok": 1}  # a stall is retried like a 503
+    assert stalled[0].closed
+    replies = iter(stalled[1:] + [Response(200, chunks=(b" " for _ in range(10_000)))])
+    with pytest.raises(jev.ModelError, match="did not finish"):
         jev.post_json("https://x.test", {})
 
 
@@ -372,3 +392,50 @@ def test_token_usage_is_totalled_per_model_for_the_task(monkeypatch, key):
                          "text-helper": {"input_tokens": 50, "output_tokens": 7, "cost": 0.001}}}
     finally:
         current.reset(token)
+
+
+def test_a_filled_sensitive_field_is_shown_filled_but_never_offered_for_typing(monkeypatch, key):
+    actions = [{"id": "e1", "kind": "fill", "node": 1, "label": "Telephone", "role": "textbox", "value": "[filled]",
+                "sensitive": True},
+               {"id": "e2", "kind": "click", "node": 1, "label": "Open Telephone", "role": "textbox",
+                "value": "[filled]", "sensitive": True},
+               {"id": "e3", "kind": "fill", "node": 3, "label": "E-mail", "role": "textbox", "value": "", "sensitive": True},
+               {"id": "e4", "kind": "click", "node": 4, "label": "Submit", "role": "button", "value": ""}]
+    post = goal_reply("CLICK", 0.5, target="3")
+    monkeypatch.setattr(jev, "post_json", post)
+    jev.choose(make_state(actions=actions), "submit the form", [])
+    body = post.bodies[0]
+    typing = body["questions"]["type_text_target"]["criteria"]
+    assert [c["element"] for c in typing.values()] == ["[2] E-mail"]  # only the empty one can pause
+    assert next(e for e in body["state"]["elements"] if e["label"] == "Telephone")["value"] == "[filled]"
+
+
+def test_the_text_helper_sees_a_date_or_time_fields_input_type():
+    action = {"label": "Preferred delivery time", "role": "textbox", "value": "", "input_type": "time"}
+    assert jev.field_context("deliver at 7:30 pm", action, make_state(), [])["field"]["input_type"] == "time"
+    assert "HH:MM" in questions.TEXT_VALUE and "YYYY-MM-DD" in questions.TEXT_VALUE
+
+
+def test_elements_carry_their_input_type():
+    elements, targets, _ = jev.action_space([{"id": "e1", "kind": "fill", "node": 1, "label": "Delivery time",
+                                              "role": "textbox", "value": "", "input_type": "time"}])
+    assert elements[0]["input_type"] == "time" and "e1" in [a["id"] for a in targets["TYPE_TEXT"].values()]
+
+
+def test_the_text_helper_must_answer_in_the_fields_value_format(monkeypatch, key):
+    replies = iter([chat(json.dumps({"text": "7:30 pm"})), chat(json.dumps({"text": "19:30"}))])
+    monkeypatch.setattr(jev, "post_json", lambda url, body: next(replies))
+    context = {"goal": "deliver at 7:30 pm", "field": {"label": "Delivery time", "input_type": "time"}}
+    assert jev.field_text(context) == "19:30"
+    monkeypatch.setattr(jev, "post_json", lambda url, body: chat(json.dumps({"text": "7:30 pm"})))
+    with pytest.raises(jev.ModelError):
+        jev.field_text(context)
+
+
+def test_a_reply_completed_by_a_late_chunk_is_kept(monkeypatch, key):
+    clock = iter([0, 5, 45])  # deadline set at 0; the answer's last bytes arrive at 45, after it
+    monkeypatch.setattr(jev.time, "monotonic", lambda: next(clock))
+    calls = []
+    late = Response(200, chunks=[b"   ", b'{"ok": 1}'])
+    monkeypatch.setattr(jev._HTTP, "post", lambda *a, **k: calls.append(1) or late)
+    assert jev.post_json("https://x.test", {}) == {"ok": 1} and len(calls) == 1

@@ -110,7 +110,8 @@ Tool flow:
    Escape, arrows...) or scrolls on those ids, then `browser_task` continues the
    same session. `sensitive_action` (for example a phone field) is never retried
    by Jev; enter such values with `browser_act` only when the user supplied them
-   and approved the step. See [SECURITY.md](SECURITY.md) for this path's limits.
+   and approved the step. Once filled, the field shows `[filled]` and Jev
+   continues without pausing on it again. See [SECURITY.md](SECURITY.md) for this path's limits.
 4. `browser_inspect` retrieves the last result/running state; `browser_cancel`
    requests cancellation. `browser_close` destroys the owned context and attempts
    saved-state removal (legacy authentication failures return a warning). If busy,
