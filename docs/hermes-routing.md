@@ -17,13 +17,14 @@ No global tool registry, core allowlist or installed computer-use skill is
 modified by the plugin.
 
 Hermes v0.21.6 normally defers plugin tools even when their toolset is enabled.
-This repository includes an **optional compatibility patch**, tested against
-Hermes v0.21.6 (`818c13be1dc4fd28987e1e881a9408224afd4535`) and a deployment
-based on that version. It adds `tools.tool_search.keep`, an exact-name list of
+This repository includes an **optional compatibility patch**, tested with
+Hermes v0.21.6 (`818c13be1dc4fd28987e1e881a9408224afd4535`). It adds `tools.tool_search.keep`, an exact-name list of
 already-enabled tools that remain directly visible. Other plugin/MCP tools keep
 their normal deferral behavior. A pin cannot enable an unavailable tool or grant
 access across profiles. `keep` takes precedence over `defer` for the same name.
 This setting is supplied by the patch; it is not a stock v0.21.6 setting.
+The patch is derived from Hermes source (Hermes Agent by Nous Research, MIT
+License); the Hermes portions it contains remain under that license.
 
 Apply only to a compatible Hermes source checkout you administer. Review the
 patch and back up your configuration first. Git's check must succeed; if your

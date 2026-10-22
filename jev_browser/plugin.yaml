@@ -1,5 +1,5 @@
 name: jev_browser
-version: 0.2.2
+version: 0.4.0
 description: >
   browser_task: TypeSafe's Jev decision model (via OpenRouter) drives the
   existing Camofox tab towards a goal and pauses back to the agent when it

@@ -4,11 +4,13 @@ FROM ${CAMOFOX_BASE_IMAGE}
 WORKDIR /app
 # Patch transitive versions as well, including older operator-supplied bases.
 # Ignore lifecycle scripts so the existing Firefox/native SQLite build is retained.
+# A high/critical npm audit finding fails the build; NPM_AUDIT_FATAL=0 only warns.
+ARG NPM_AUDIT_FATAL=1
 RUN npm pkg set overrides.adm-zip=0.6.1 overrides.brace-expansion=5.0.12 \
         overrides.fast-uri=3.1.8 overrides.hono=4.13.13 overrides.ip-address=10.7.4 \
         overrides.js-yaml=4.3.2 overrides.qs=6.16.1 \
     && npm install --omit=dev --ignore-scripts --save-exact playwright-core@1.59.1 proxy-addr@2.0.8 @modelcontextprotocol/sdk@1.32.1 \
-    && npm audit --omit=dev --audit-level=high \
+    && { npm audit --omit=dev --audit-level=high || [ "$NPM_AUDIT_FATAL" = "0" ]; } \
     && npm cache clean --force
 # Temporary carry until upstream fixes /click: bounds its DOM-click fallback and
 # treats a delivered click whose navigation is slow as success instead of running

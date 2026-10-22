@@ -16,11 +16,16 @@ Standalone sessions are independent of native Hermes sessions even when they
 use the same Camofox server or proxy. The MCP `browser_task` requires a session
 ID; the native Hermes tool instead uses its current task's tab.
 
-The MCP server currently exports five tools: open, task, inspect, cancel and
-close. Results contain page text and status. Screenshots and manual click/type
-controls require a separate host integration; Hermes' `browser_*` tools are not
-automatically present in standalone MCP clients. Another browser tool does not
-automatically share a standalone session's cookies or tab.
+The MCP server exports seven tools: `browser_open`, `browser_task`,
+`browser_snapshot`, `browser_act`, `browser_inspect`, `browser_cancel` and
+`browser_close`. Results contain page text and status. When a task pauses, the
+supervisor can do one step itself on the same tab: `browser_snapshot` returns the
+page text and element ids, `browser_act` clicks, types, selects, presses an
+allowlisted key or scrolls on those ids, and `browser_task` then continues the
+same session. Screenshots require a separate host integration; Hermes'
+`browser_*` tools are not automatically present in standalone MCP clients.
+Another browser tool does not automatically share a standalone session's cookies
+or tab.
 
 ## Codex and Claude Code
 

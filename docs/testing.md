@@ -30,9 +30,9 @@ replace Firefox/native SQLite. This scans npm dependencies, not every OS or
 browser vulnerability; repeat broader image scans when updating the base.
 
 Parity gaps: the deterministic provider proves the transport/executor, not real
-Jev judgments. The public pinned browser is tested directly; a private metered
-proxy and the deployed Hermes installation cannot run in public CI. Verify
-those with isolated identities against the existing service before deployment.
+Jev judgments. The public pinned browser is tested directly; a metered proxy
+and a native Hermes installation cannot run in public CI. Verify those with
+isolated identities against your own service before relying on them.
 Never use a real user's cookie identity for a smoke test.
 
 `JEV_LIVE=1 python -m pytest tests/test_live.py -s` uses the configured real
