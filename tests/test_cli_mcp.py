@@ -97,7 +97,7 @@ def test_missing_mcp_extra_reports_source_install_on_stderr(monkeypatch, capsys)
     assert cli.main(["mcp"]) == 2
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "python -m pip install '.[mcp]'" in captured.err
+    assert "python -m pip install 'jev-browser[mcp]'" in captured.err
 
 
 def test_mcp_tools_share_browser_and_return_structured_results():
