@@ -52,3 +52,14 @@ the intended source can be read without authentication. Review available GitHub
 branch-protection/required-check settings and private vulnerability reporting for
 the repository's plan and visibility. Publish only the reviewed artifacts and
 retain test evidence. None of these actions are performed by this checklist.
+
+## Publishing to PyPI
+
+`.github/workflows/publish.yml` uploads the sdist and wheel when a GitHub
+release is published. It uses PyPI trusted publishing, so no token is stored.
+One-time setup: on PyPI add a trusted publisher for project `jev-browser` with
+this repository, workflow `publish.yml` and environment `pypi`, and create the
+`pypi` environment under the repository's Settings → Environments. To release,
+bump the version in `pyproject.toml` and `jev_browser/plugin.yaml`, move the
+CHANGELOG entries under the new version, merge, then publish a release tagged
+`v<version>` on that commit. The workflow fails if the tag and version differ.
