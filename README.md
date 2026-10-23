@@ -13,12 +13,12 @@ Adapted from [browser-use/jev-ultrafast](https://github.com/browser-use/jev-ultr
 (MIT). Requires Python 3.11+, a running Camofox service, and your own OpenRouter
 key with access to Jev's decisions endpoint. **A proxy is optional.** Requests
 cost money at your provider's rates; the package includes no model credits.
-Read [SECURITY.md](SECURITY.md) before browsing private or authenticated pages.
+Read [SECURITY.md](https://github.com/harmanbassi/jev-agent-browser/blob/main/SECURITY.md) before browsing private or authenticated pages.
 
 Codex or Claude supplies the goal and checks the result; Jev chooses observed
 page actions and Camofox executes them. The standalone interfaces work without
-Hermes. See [agent setup](docs/agent-setup.md) for routing instructions and
-[Camofox operations](docs/camofox-operations.md) for supported versions and upgrades.
+Hermes. See [agent setup](https://github.com/harmanbassi/jev-agent-browser/blob/main/docs/agent-setup.md) for routing instructions and
+[Camofox operations](https://github.com/harmanbassi/jev-agent-browser/blob/main/docs/camofox-operations.md) for supported versions and upgrades.
 
 The repository is named `jev-agent-browser`; the Python distribution and command
 remain `jev-browser`, and the import/plugin name remains `jev_browser`.
@@ -70,7 +70,7 @@ Exit codes: 0 done, 1 task/diagnostic error, 2 configuration/usage error, 3 paus
 If Jev returns 401/403, check model access and your key; 429 indicates provider
 limits. The alpha decisions API can change independently of this project.
 For browser authentication failures, cleanup warnings and missing tools, see
-[troubleshooting](docs/troubleshooting.md). `doctor --probe` verifies browser
+[troubleshooting](https://github.com/harmanbassi/jev-agent-browser/blob/main/docs/troubleshooting.md). `doctor --probe` verifies browser
 control and cleanup; a successful public `/health` check alone cannot verify a key.
 
 ### CLI reference
@@ -125,7 +125,7 @@ Tool flow:
    same session. `sensitive_action` (for example a phone field) is never retried
    by Jev; enter such values with `browser_act` only when the user supplied them
    and approved the step. Once filled, the field shows `[filled]` and Jev
-   continues without pausing on it again. See [SECURITY.md](SECURITY.md) for this path's limits.
+   continues without pausing on it again. See [SECURITY.md](https://github.com/harmanbassi/jev-agent-browser/blob/main/SECURITY.md) for this path's limits.
 4. `browser_inspect` retrieves the last result/running state; `browser_cancel`
    requests cancellation. `browser_close` destroys the owned context and attempts
    saved-state removal (legacy authentication failures return a warning). If busy,
@@ -178,7 +178,7 @@ where a row names the interfaces:
 | `tab_lost` | The browser destroyed the tab during an action, which may have taken effect |
 | `vision_budget`, `vision_capture_budget` | The image request or capture budget is used up |
 | `vision_completion_unverified` | A `require_visual` task's image did not establish the goal |
-| `vision_capture_unavailable`, `vision_capture_failed`, `vision_invalid_observation`, `vision_url_blocked`, `vision_expired_observation`, `vision_target_ambiguous` | Visual evidence could not be captured or used; see [visual browsing](docs/vision.md#common-pauses) |
+| `vision_capture_unavailable`, `vision_capture_failed`, `vision_invalid_observation`, `vision_url_blocked`, `vision_expired_observation`, `vision_target_ambiguous` | Visual evidence could not be captured or used; see [visual browsing](https://github.com/harmanbassi/jev-agent-browser/blob/main/docs/vision.md#common-pauses) |
 
 Errors carry a readable message in `reason` instead. `vision_disabled` and
 `vision_dependency_missing` are errors returned before a task starts.
@@ -221,7 +221,7 @@ Task options cannot enable uploads if the operator has disabled them.
 page without uploading an image. `--vision-model-probe` explicitly makes a paid
 image request. The regular doctor remains read-only and makes no paid requests.
 Old Camofox servers continue to support text browsing; visual tasks pause when
-the masked endpoint is unavailable. See [visual browsing](docs/vision.md) for
+the masked endpoint is unavailable. See [visual browsing](https://github.com/harmanbassi/jev-agent-browser/blob/main/docs/vision.md) for
 privacy boundaries, budgets, installation and failure reasons.
 
 ## Hermes
@@ -284,7 +284,7 @@ The plugin supplies Jev-first browsing instructions on Hermes versions supportin
 plugin prompt sections. This covers ordinary requests and follow-ups, manual
 fallbacks, and discovery when Hermes defers plugin tools. **Enabled does not mean
 directly visible:** check the model's actual tool list, not only plugin registration.
-See [Hermes routing and acceptance tests](docs/hermes-routing.md), including an
+See [Hermes routing and acceptance tests](https://github.com/harmanbassi/jev-agent-browser/blob/main/docs/hermes-routing.md), including an
 optional, version-tested host patch to keep `browser_task` directly visible.
 
 ## Python
@@ -353,10 +353,10 @@ blocked even with `JEV_ALLOW_PRIVATE_URLS=1`.
 | `JEV_URL`, `JEV_TEXT_URL` | OpenRouter decisions/chat endpoints |
 | `JEV_ALLOWED_HOSTS` | Empty; otherwise exact comma-separated page hosts |
 | `JEV_ALLOW_PRIVATE_URLS` | `0`; standalone private-page opt-in |
-| `JEV_FAST_CLICK` | `0`; optional [Camofox plugin](camofox_plugin/README.md) |
+| `JEV_FAST_CLICK` | `0`; optional [Camofox plugin](https://github.com/harmanbassi/jev-agent-browser/blob/main/camofox_plugin/README.md) |
 | `JEV_ALLOW_INSECURE_CAMOFOX` | `0`; permit a remote cleartext (`http://`) Camofox on a trusted network |
 | `JEV_ALLOW_INSECURE_MODEL_URLS` | `0`; permit cleartext development model endpoints |
-| `JEV_VISION_*` | Optional visual browsing; see the [vision settings](docs/vision.md#install-and-configure) |
+| `JEV_VISION_*` | Optional visual browsing; see the [vision settings](https://github.com/harmanbassi/jev-agent-browser/blob/main/docs/vision.md#install-and-configure) |
 
 Task defaults: 25 executed steps, 100 model HTTP requests including helper/retry
 calls, 300 seconds. Maximums: 100 steps, 500 requests, 900 seconds. Cancellation
@@ -381,10 +381,10 @@ JEV_LIVE=1 python -m pytest tests/test_live.py -s
 ```
 
 CI tests installed artifacts, MCP stdio, public-image browser execution and both
-old and new contracts. See [docs/testing.md](docs/testing.md). Remove the demo
+old and new contracts. See [docs/testing.md](https://github.com/harmanbassi/jev-agent-browser/blob/main/docs/testing.md). Remove the demo
 browser with `docker compose --env-file .env -f examples/compose.yaml down -v`.
-Release history is in [CHANGELOG.md](CHANGELOG.md); maintainers can use the
-[release checklist](docs/releasing.md) before publishing a reviewed commit.
+Release history is in [CHANGELOG.md](https://github.com/harmanbassi/jev-agent-browser/blob/main/CHANGELOG.md); maintainers can use the
+[release checklist](https://github.com/harmanbassi/jev-agent-browser/blob/main/docs/releasing.md) before publishing a reviewed commit.
 
-MIT: original contributions [LICENSE](LICENSE); adapted upstream portions retain
-[LICENSE-jev-ultrafast](LICENSE-jev-ultrafast).
+MIT: original contributions [LICENSE](https://github.com/harmanbassi/jev-agent-browser/blob/main/LICENSE); adapted upstream portions retain
+[LICENSE-jev-ultrafast](https://github.com/harmanbassi/jev-agent-browser/blob/main/LICENSE-jev-ultrafast).

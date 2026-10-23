@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Publish to PyPI from a GitHub release through trusted publishing
+  (`.github/workflows/publish.yml`); the release tag must match the package
+  version. README links are absolute so they work on the PyPI page.
+
 ## 0.4.0 — 2026-10-22
 
 - Bound each model reply by a 30 s wall-clock deadline and retry a stalled reply
