@@ -29,7 +29,7 @@ def main(argv=None):
             try:
                 from .mcp_server import serve
             except ImportError:
-                print("MCP requires the optional SDK. From your source checkout run: python -m pip install '.[mcp]'", file=sys.stderr)
+                print("MCP requires the optional SDK: python -m pip install 'jev-browser[mcp]'", file=sys.stderr)
                 return 2
             serve()
             return 0
