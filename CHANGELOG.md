@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- README installs from PyPI (`pip install 'jev-browser[mcp]'`).
+
 ## 0.4.0 — 2026-10-23
 
 - Publish to PyPI from a GitHub release through trusted publishing

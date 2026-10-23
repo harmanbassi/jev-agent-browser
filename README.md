@@ -28,12 +28,15 @@ remain `jev-browser`, and the import/plugin name remains `jev_browser`.
 Prerequisites: Python 3.11+, Docker with Compose to run the Camofox server
 (unless you already have one), and an OpenRouter API key with access to Jev.
 
+The package is on PyPI: `python -m pip install 'jev-browser[mcp]'`. The clone
+below adds the example settings file and the Camofox build.
+
 ```bash
 git clone https://github.com/harmanbassi/jev-agent-browser.git
 cd jev-agent-browser
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install '.[mcp]'
+python -m pip install 'jev-browser[mcp]'
 cp .env.example .env
 chmod 600 .env
 ```
@@ -45,7 +48,7 @@ Quote values containing shell characters such as spaces, `#` or `$` before
 sourcing the file. If changing the published browser port, update `CAMOFOX_URL`
 to match it as well.
 On Windows use `.venv\Scripts\Activate.ps1` and set the environment through your
-shell or agent settings. MCP is optional: `pip install .` installs the core/CLI.
+shell or agent settings. MCP is optional: `pip install jev-browser` installs the core/CLI.
 
 If you already have Camofox, set `CAMOFOX_URL` and its authentication key and keep
 that service. Otherwise build the pinned Camofox 1.18.1 image plus its dependency
@@ -201,7 +204,7 @@ applies, and Jev acts on the copy it preferred. Script-handled links (`#...`,
 ## Optional visual browsing
 
 Jev 1.14 can use images alongside page text. Vision is **off by default** and
-experimental. Install `python -m pip install '.[mcp,vision]'`, rebuild the browser
+experimental. Install `python -m pip install 'jev-browser[mcp,vision]'`, rebuild the browser
 image from this checkout, then explicitly permit masked image uploads with
 `JEV_VISION_ENABLED=1` in the environment of your Python/CLI/MCP process or
 Hermes profile. Your OpenRouter key must have access to `typesafe/jev-1.14`.
