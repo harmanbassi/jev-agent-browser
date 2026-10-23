@@ -27,8 +27,8 @@ dependencies = ["requests>=2.33.0,<3"]
 
 [project.optional-dependencies]
 mcp = ["mcp>=2.0,<3"]
-vision = ["Pillow>=12.3,<13"]
-dev = ["pytest>=8", "coverage>=7", "build>=1.2", "setuptools>=77", "mcp>=2.0,<3", "Pillow>=12.3,<13"]
+vision = ["Pillow>=12.3,<14"]
+dev = ["pytest>=8", "coverage>=7", "build>=1.2", "setuptools>=77", "mcp>=2.0,<3", "Pillow>=12.3,<14"]
 
 [project.urls]
 Repository = "https://github.com/harmanbassi/jev-agent-browser"
